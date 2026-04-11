@@ -1,0 +1,67 @@
+{
+  "secret_key": "a7c6a5d57b29d6288b3b4d04308a40df24c3a0bf52d205fa047e6fc7973eb771",
+  "users": {
+    "moneychen": {
+      "password_hash": "sha256:e2dd2d66c2f1af105b5a216830581c04:5d9a6169dfd058b2e676d35e9fd841638e1b9b71b0062ea1eca87b5b852b2917",
+      "modules": {
+        "overview": true,
+        "positions": true,
+        "performance": true,
+        "details": true
+      },
+      "visible_accounts": ["combined", "u12672188", "u11181997"]
+    },
+    "guest": {
+      "password_hash": "sha256:aeb979f67f0687602136e2ae16d00f1d:38f16ef3069ba626746fd3f01689a0f8eb08166555a473fd4183bda05209b30c",
+      "modules": {
+        "overview": true,
+        "positions": false,
+        "performance": true,
+        "details": false
+      },
+      "visible_accounts": ["combined"]
+    }
+  },
+  "public": {
+    "account": "combined",
+    "modules": {
+      "overview": true,
+      "positions": false,
+      "performance": true,
+      "details": false
+    }
+  },
+  "accounts": {
+    "combined": {
+      "real_id": "COMBINED",
+      "file": "data/dashboard_combined.json",
+      "label": "全部账户",
+      "color": "#000000"
+    },
+    "u12672188": {
+      "real_id": "U12672188",
+      "file": "data/dashboard_U12672188.json",
+      "label": "主账户",
+      "color": "#6366f1"
+    },
+    "u11181997": {
+      "real_id": "U11181997",
+      "file": "data/dashboard_U11181997.json",
+      "label": "历史账户",
+      "color": "#10b981"
+    }
+  },
+  "settings": {
+    "baseCurrency": "CNH",
+    "fxOverrides": {},
+    "retention": {
+      "backups": 15,
+      "uploads": 30,
+      "logs": 90
+    },
+    "webhook": {
+      "url": "",
+      "events": ["refresh_failed", "import_failed", "disk_low", "stale_data"]
+    }
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "accountInfo": {
+    "accountId": "U12672188",
+    "accountName": "moneychen003",
+    "currency": "CNH",
+    "fromDate": "20260309",
+    "toDate": "20260407",
+    "whenGenerated": "20260408;094000"
+  },
+  "netAssetValue": {
+    "total": 2649071.00,
+    "cash": 425321.67,
+    "equity": 2898105.00,
+    "options": -249034.00,
+    "forex": 0,
+    "changeToday": 12543.21,
+    "changeTodayPct": 0.47,
+    "changePeriod": -89234.56,
+    "changePeriodPct": -3.26
+  },
+  "cashReport": [
+    {"currency": "CNH", "amount": 425321.67},
+    {"currency": "USD", "amount": 0},
+    {"currency": "HKD", "amount": 0}
+  ],
+  "forexBalances": [],
+  "openPositions": {
+    "stocks": [
+      {"symbol": "XPEV", "description": "小鹏汽车 ADR", "quantity": 59600, "costBasis": 15.20, "marketPrice": 17.22, "marketValue": 1026312, "unrealizedPL": 120392, "unrealizedPLPct": 13.29, "weight": 35.4},
+      {"symbol": "QQQ", "description": "纳斯达克 100 ETF", "quantity": 753, "costBasis": 520.00, "marketPrice": 588.59, "marketValue": 443325, "unrealizedPL": 51648, "unrealizedPLPct": 13.19, "weight": 15.3},
+      {"symbol": "XIACY", "description": "小米 ADR", "quantity": 13630, "costBasis": 17.50, "marketPrice": 19.99, "marketValue": 272484, "unrealizedPL": 33939, "unrealizedPLPct": 14.23, "weight": 9.4},
+      {"symbol": "SGOV", "description": "0-3 月国债 ETF", "quantity": 2121, "costBasis": 99.80, "marketPrice": 100.45, "marketValue": 213060, "unrealizedPL": 1379, "unrealizedPLPct": 0.65, "weight": 7.3},
+      {"symbol": "COIN", "description": "Coinbase", "quantity": 800, "costBasis": 150.00, "marketPrice": 175.18, "marketValue": 140144, "unrealizedPL": 20144, "unrealizedPLPct": 16.79, "weight": 4.8},
+      {"symbol": "MU", "description": "美光科技", "quantity": 300, "costBasis": 320.00, "marketPrice": 377.58, "marketValue": 113274, "unrealizedPL": 17274, "unrealizedPLPct": 17.99, "weight": 3.9},
+      {"symbol": "LI", "description": "理想汽车 ADR", "quantity": 5900, "costBasis": 16.80, "marketPrice": 18.42, "marketValue": 108678, "unrealizedPL": 9558, "unrealizedPLPct": 9.64, "weight": 3.7},
+      {"symbol": "HY9H", "description": "SK Hynix GDS", "quantity": 200, "costBasis": 480.00, "marketPrice": 528.00, "marketValue": 105600, "unrealizedPL": 9600, "unrealizedPLPct": 10.00, "weight": 3.6},
+      {"symbol": "QQQI", "description": "Neos Nasdaq ETF", "quantity": 1804, "costBasis": 48.50, "marketPrice": 50.51, "marketValue": 91151, "unrealizedPL": 3636, "unrealizedPLPct": 4.14, "weight": 3.1},
+      {"symbol": "QQQM", "description": "纳斯达克 100 ETF", "quantity": 301, "costBasis": 220.00, "marketPrice": 242.38, "marketValue": 72889, "unrealizedPL": 6736, "unrealizedPLPct": 10.17, "weight": 2.5},
+      {"symbol": "BABA", "description": "阿里巴巴 ADR", "quantity": 500, "costBasis": 105.00, "marketPrice": 119.72, "marketValue": 59860, "unrealizedPL": 7360, "unrealizedPLPct": 14.02, "weight": 2.1},
+      {"symbol": "SOXX", "description": "半导体 ETF", "quantity": 100, "costBasis": 320.00, "marketPrice": 347.76, "marketValue": 34795, "unrealizedPL": 2776, "unrealizedPLPct": 8.68, "weight": 1.2},
+      {"symbol": "MPNGY", "description": "美团 ADR", "quantity": 1500, "costBasis": 18.50, "marketPrice": 20.60, "marketValue": 30900, "unrealizedPL": 3150, "unrealizedPLPct": 11.35, "weight": 1.1},
+      {"symbol": "SPY", "description": "标普 500 ETF", "quantity": 40, "costBasis": 620.00, "marketPrice": 659.22, "marketValue": 26501, "unrealizedPL": 1569, "unrealizedPLPct": 6.32, "weight": 0.9},
+      {"symbol": "EWY", "description": "韩国 ETF", "quantity": 200, "costBasis": 115.00, "marketPrice": 127.19, "marketValue": 25438, "unrealizedPL": 2438, "unrealizedPLPct": 10.60, "weight": 0.9},
+      {"symbol": "SPYM", "description": "标普 500 ETF", "quantity": 303, "costBasis": 72.00, "marketPrice": 77.59, "marketValue": 23521, "unrealizedPL": 1694, "unrealizedPLPct": 7.76, "weight": 0.8},
+      {"symbol": "MSFT", "description": "微软", "quantity": 50, "costBasis": 350.00, "marketPrice": 372.29, "marketValue": 18653, "unrealizedPL": 1115, "unrealizedPLPct": 6.37, "weight": 0.6},
+      {"symbol": "VOO", "description": "标普 500 ETF", "quantity": 30, "costBasis": 580.00, "marketPrice": 606.04, "marketValue": 18358, "unrealizedPL": 781, "unrealizedPLPct": 4.49, "weight": 0.6},
+      {"symbol": "NVO", "description": "诺和诺德 ADR", "quantity": 440, "costBasis": 34.00, "marketPrice": 36.91, "marketValue": 16222, "unrealizedPL": 1280, "unrealizedPLPct": 8.56, "weight": 0.6},
+      {"symbol": "JEPI", "description": "股票溢价收益 ETF", "quantity": 212, "costBasis": 54.00, "marketPrice": 56.52, "marketValue": 11989, "unrealizedPL": 534, "unrealizedPLPct": 4.67, "weight": 0.4},
+      {"symbol": "TCOM", "description": "携程 ADR", "quantity": 100, "costBasis": 45.00, "marketPrice": 50.22, "marketValue": 5022, "unrealizedPL": 522, "unrealizedPLPct": 11.60, "weight": 0.2},
+      {"symbol": "SCHW", "description": "嘉信理财", "quantity": 0.3, "costBasis": 90.00, "marketPrice": 93.34, "marketValue": 29, "unrealizedPL": 1, "unrealizedPLPct": 3.71, "weight": 0.0}
+    ],
+    "options": [
+      {"symbol": "MU", "description": "MU 270115P00370000", "type": "Put", "quantity": -15, "strike": 370, "expiry": "2027-01-15", "costBasis": 95.00, "marketPrice": 80.01, "marketValue": -120016, "unrealizedPL": 22485, "unrealizedPLPct": 15.77, "daysToExpiry": 282, "breakEven": 289.99, "inTheMoney": false},
+      {"symbol": "LI", "description": "LI 260618P00030000", "type": "Put", "quantity": -41, "strike": 30, "costBasis": 14.50, "marketPrice": 11.63, "expiry": "2026-06-18", "marketValue": -47672, "unrealizedPL": 11767, "unrealizedPLPct": 19.79, "daysToExpiry": 71, "breakEven": 27.09, "inTheMoney": false},
+      {"symbol": "AVGO", "description": "AVGO 260618P00040000", "type": "Put", "quantity": -5, "strike": 400, "costBasis": 85.00, "marketPrice": 72.42, "expiry": "2026-06-18", "marketValue": -36208, "unrealizedPL": 6290, "unrealizedPLPct": 14.80, "daysToExpiry": 71, "breakEven": 327.58, "inTheMoney": false},
+      {"symbol": "TCOM", "description": "TCOM 270115P00070000", "type": "Put", "quantity": -10, "strike": 70, "costBasis": 24.00, "marketPrice": 20.38, "expiry": "2027-01-15", "marketValue": -20376, "unrealizedPL": 3620, "unrealizedPLPct": 15.08, "daysToExpiry": 282, "breakEven": 49.62, "inTheMoney": false},
+      {"symbol": "NVDA", "description": "NVDA 261218P00015000", "type": "Put", "quantity": -10, "strike": 150, "costBasis": 14.00, "marketPrice": 11.50, "expiry": "2026-12-18", "marketValue": -11500, "unrealizedPL": 2500, "unrealizedPLPct": 17.86, "daysToExpiry": 254, "breakEven": 138.50, "inTheMoney": false},
+      {"symbol": "MSFT", "description": "MSFT 261218P00043000", "type": "Put", "quantity": -1, "strike": 430, "costBasis": 85.00, "marketPrice": 70.52, "expiry": "2026-12-18", "marketValue": -7052, "unrealizedPL": 1448, "unrealizedPLPct": 17.04, "daysToExpiry": 254, "breakEven": 359.48, "inTheMoney": false},
+      {"symbol": "XPEV", "description": "XPEV 260417P00030000", "type": "Put", "quantity": -4, "strike": 30, "costBasis": 15.00, "marketPrice": 12.84, "expiry": "2026-04-17", "marketValue": -5136, "unrealizedPL": 864, "unrealizedPLPct": 14.40, "daysToExpiry": 9, "breakEven": 27.16, "inTheMoney": false},
+      {"symbol": "LI", "description": "LI 260501C00019500", "type": "Call", "quantity": -25, "strike": 19.5, "costBasis": 0.60, "marketPrice": 0.47, "expiry": "2026-05-01", "marketValue": -1163, "unrealizedPL": 325, "unrealizedPLPct": 21.67, "daysToExpiry": 23, "breakEven": 19.97, "inTheMoney": false},
+      {"symbol": "XPEV", "description": "XPEV 260417C00019500", "type": "Call", "quantity": -100, "strike": 19.5, "costBasis": 0.12, "marketPrice": 0.09, "expiry": "2026-04-17", "marketValue": -911, "unrealizedPL": 289, "unrealizedPLPct": 25.00, "daysToExpiry": 9, "breakEven": 19.59, "inTheMoney": false}
+    ]
+  },
+  "complexPositions": [],
+  "priorPeriodPositions": {
+    "totalValue": 2738305.56,
+    "change": -89234.56,
+    "changePct": -3.26
+  },
+  "performanceSummary": {
+    "realizedPL": 45678.90,
+    "unrealizedPL": 289456.78,
+    "totalPL": 335135.68,
+    "totalPLPct": 14.50,
+    "mtmToday": 12543.21,
+    "mtmMonth": -23456.78,
+    "mtmYear": 89012.34
+  },
+  "dividends": {
+    "totalReceived": 8934.56,
+    "details": [
+      {"symbol": "QQQ", "amount": 2345.67, "exDate": "2026-03-20", "payDate": "2026-03-25"},
+      {"symbol": "SPY", "amount": 1234.56, "exDate": "2026-03-15", "payDate": "2026-03-20"},
+      {"symbol": "JEPI", "amount": 987.65, "exDate": "2026-03-28", "payDate": "2026-04-02"},
+      {"symbol": "MSFT", "amount": 876.54, "exDate": "2026-02-15", "payDate": "2026-02-20"}
+    ]
+  },
+  "fees": {
+    "commissionTotal": 1234.56,
+    "borrowFeesTotal": 567.89,
+    "salesTaxTotal": 0,
+    "routingCommissions": 123.45
+  },
+  "securitiesLent": {
+    "totalValue": 0,
+    "collateral": 0,
+    "feeIncome": 0
+  },
+  "optionExercises": [],
+  "pendingExercises": [],
+  "categoryBreakdown": {
+    "中概股": {"value": 1503256, "pct": 51.9},
+    "指数 ETF": {"value": 667833, "pct": 23.0},
+    "科技/半导体": {"value": 420077, "pct": 14.5},
+    "现金等价物": {"value": 213060, "pct": 7.3},
+    "其他": {"value": 60845, "pct": 2.1},
+    "期权空头": {"value": -249034, "pct": -8.6}
+  },
+  "currencyBreakdown": {
+    "CNH": {"value": 2649071, "pct": 100},
+    "USD": {"value": 0, "pct": 0},
+    "HKD": {"value": 0, "pct": 0}
+  },
+  "history": {
+    "nav30Days": [
+      {"date": "2026-03-09", "nav": 2738305.56},
+      {"date": "2026-03-10", "nav": 2725432.10},
+      {"date": "2026-03-11", "nav": 2710987.65},
+      {"date": "2026-03-12", "nav": 2698765.43},
+      {"date": "2026-03-13", "nav": 2715432.10},
+      {"date": "2026-03-16", "nav": 2730987.65},
+      {"date": "2026-03-17", "nav": 2745678.90},
+      {"date": "2026-03-18", "nav": 2732109.87},
+      {"date": "2026-03-19", "nav": 2718765.43},
+      {"date": "2026-03-20", "nav": 2705432.10},
+      {"date": "2026-03-23", "nav": 2692109.87},
+      {"date": "2026-03-24", "nav": 2678765.43},
+      {"date": "2026-03-25", "nav": 2665432.10},
+      {"date": "2026-03-26", "nav": 2652109.87},
+      {"date": "2026-03-27", "nav": 2638765.43},
+      {"date": "2026-03-30", "nav": 2625432.10},
+      {"date": "2026-03-31", "nav": 2612109.87},
+      {"date": "2026-04-01", "nav": 2598765.43},
+      {"date": "2026-04-02", "nav": 2610987.65},
+      {"date": "2026-04-03", "nav": 2623456.78},
+      {"date": "2026-04-07", "nav": 2636527.79},
+      {"date": "2026-04-08", "nav": 2649071.00}
+    ]
+  }
+}

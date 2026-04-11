@@ -1,0 +1,366 @@
+22:32:54 Worker 38a53266538e458b8083f43cd46a6922: started with PID 34904, version 2.7.0
+22:32:54 Worker 38a53266538e458b8083f43cd46a6922: subscribing to channel rq:pubsub:38a53266538e458b8083f43cd46a6922
+22:32:54 *** Listening on default...
+22:32:54 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+22:34:02 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (4fb4e7b0-2af3-4062-bbec-9d6631708206)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+📥 解析 XML: /Users/mc/kimicode/ib_dashboard/uploads/flex_sync_20260410_223405_5800d4ba.xml
+   发现 5 个 FlexStatement
+🔍 扫描 Schema...
+   发现 26 种节点类型
+🗄️  初始化 PostgreSQL 表...
+📝 导入所有节点数据...
+
+✅ 导入完成
+   核心 daily_nav: 5 条
+     archive_conversion_rate: 195 条
+     archive_mtm_performance_summary_underlying: 167 条
+     archive_open_position: 151 条
+     archive_security_info: 151 条
+     archive_prior_period_position: 116 条
+     archive_net_stock_position: 110 条
+     archive_statement_of_funds_line: 26 条
+     archive_cash_report_currency: 25 条
+     archive_change_in_position_value: 25 条
+     archive_open_dividend_accrual: 25 条
+     archive_interest_accruals_currency: 20 条
+     archive_trade: 15 条
+     archive_unbundled_commission_detail: 13 条
+     archive_tier_interest_detail: 12 条
+     archive_slb_activity: 12 条
+22:34:05 Successfully completed workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') job in 0:00:03.176472s on worker 38a53266538e458b8083f43cd46a6922
+22:34:05 default: Job OK (4fb4e7b0-2af3-4062-bbec-9d6631708206)
+22:34:05 Result is kept for 500 seconds
+22:47:35 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+22:49:58 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (30f7e935-ec0e-4bc0-a27e-4cc4adbabcd6)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+📥 解析 XML: /Users/mc/kimicode/ib_dashboard/uploads/flex_sync_20260410_225121_5800d4ba.xml
+   发现 5 个 FlexStatement
+🔍 扫描 Schema...
+   发现 26 种节点类型
+🗄️  初始化 PostgreSQL 表...
+📝 导入所有节点数据...
+
+✅ 导入完成
+   核心 daily_nav: 5 条
+     archive_conversion_rate: 195 条
+     archive_mtm_performance_summary_underlying: 167 条
+     archive_open_position: 151 条
+     archive_security_info: 151 条
+     archive_prior_period_position: 116 条
+     archive_net_stock_position: 110 条
+     archive_statement_of_funds_line: 26 条
+     archive_cash_report_currency: 25 条
+     archive_change_in_position_value: 25 条
+     archive_open_dividend_accrual: 25 条
+     archive_interest_accruals_currency: 20 条
+     archive_trade: 15 条
+     archive_unbundled_commission_detail: 13 条
+     archive_tier_interest_detail: 12 条
+     archive_slb_activity: 12 条
+22:51:22 Successfully completed workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') job in 0:01:23.516611s on worker 38a53266538e458b8083f43cd46a6922
+22:51:22 default: Job OK (30f7e935-ec0e-4bc0-a27e-4cc4adbabcd6)
+22:51:22 Result is kept for 500 seconds
+22:54:01 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (b787463b-cb40-4a3c-9458-384c65893584)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+📥 解析 XML: /Users/mc/kimicode/ib_dashboard/uploads/flex_sync_20260410_225404_5800d4ba.xml
+   发现 5 个 FlexStatement
+🔍 扫描 Schema...
+   发现 26 种节点类型
+🗄️  初始化 PostgreSQL 表...
+📝 导入所有节点数据...
+
+✅ 导入完成
+   核心 daily_nav: 5 条
+     archive_conversion_rate: 195 条
+     archive_mtm_performance_summary_underlying: 167 条
+     archive_open_position: 151 条
+     archive_security_info: 151 条
+     archive_prior_period_position: 116 条
+     archive_net_stock_position: 110 条
+     archive_statement_of_funds_line: 26 条
+     archive_cash_report_currency: 25 条
+     archive_change_in_position_value: 25 条
+     archive_open_dividend_accrual: 25 条
+     archive_interest_accruals_currency: 20 条
+     archive_trade: 15 条
+     archive_unbundled_commission_detail: 13 条
+     archive_tier_interest_detail: 12 条
+     archive_slb_activity: 12 条
+22:54:04 Successfully completed workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') job in 0:00:02.895202s on worker 38a53266538e458b8083f43cd46a6922
+22:54:04 default: Job OK (b787463b-cb40-4a3c-9458-384c65893584)
+22:54:04 Result is kept for 500 seconds
+23:00:49 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+23:08:19 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (d76094df-6ea6-4e24-9aed-1fbf17069b2f)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+📥 解析 XML: /Users/mc/kimicode/ib_dashboard/uploads/flex_sync_20260410_230839_5800d4ba.xml
+   发现 22 个 FlexStatement
+🔍 扫描 Schema...
+   发现 27 种节点类型
+🗄️  初始化 PostgreSQL 表...
+📝 导入所有节点数据...
+
+✅ 导入完成
+   核心 daily_nav: 22 条
+     archive_conversion_rate: 858 条
+     archive_mtm_performance_summary_underlying: 734 条
+     archive_security_info: 664 条
+     archive_open_position: 662 条
+     archive_prior_period_position: 619 条
+     archive_net_stock_position: 487 条
+     archive_statement_of_funds_line: 116 条
+     archive_cash_report_currency: 110 条
+     archive_change_in_position_value: 110 条
+     archive_mtdytd_performance_summary_underlying: 92 条
+     archive_interest_accruals_currency: 75 条
+     archive_open_dividend_accrual: 64 条
+     archive_trade: 63 条
+     archive_tier_interest_detail: 57 条
+     archive_slb_activity: 57 条
+23:08:40 Successfully completed workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') job in 0:00:20.874192s on worker 38a53266538e458b8083f43cd46a6922
+23:08:40 default: Job OK (d76094df-6ea6-4e24-9aed-1fbf17069b2f)
+23:08:40 Result is kept for 500 seconds
+23:10:35 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (039e63f3-160f-4933-a435-e169c94ae715)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+📥 解析 XML: /Users/mc/kimicode/ib_dashboard/uploads/flex_sync_20260410_231056_5800d4ba.xml
+   发现 22 个 FlexStatement
+🔍 扫描 Schema...
+   发现 27 种节点类型
+🗄️  初始化 PostgreSQL 表...
+📝 导入所有节点数据...
+
+✅ 导入完成
+   核心 daily_nav: 22 条
+     archive_conversion_rate: 858 条
+     archive_mtm_performance_summary_underlying: 734 条
+     archive_security_info: 664 条
+     archive_open_position: 662 条
+     archive_prior_period_position: 619 条
+     archive_net_stock_position: 487 条
+     archive_statement_of_funds_line: 116 条
+     archive_cash_report_currency: 110 条
+     archive_change_in_position_value: 110 条
+     archive_mtdytd_performance_summary_underlying: 92 条
+     archive_interest_accruals_currency: 75 条
+     archive_open_dividend_accrual: 64 条
+     archive_trade: 63 条
+     archive_tier_interest_detail: 57 条
+     archive_slb_activity: 57 条
+23:10:56 Successfully completed workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') job in 0:00:21.252662s on worker 38a53266538e458b8083f43cd46a6922
+23:10:56 default: Job OK (039e63f3-160f-4933-a435-e169c94ae715)
+23:10:56 Result is kept for 500 seconds
+23:10:56 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+23:24:26 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+23:37:57 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+23:51:27 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+00:04:57 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+00:18:27 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+00:31:57 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+00:45:27 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+00:58:57 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+01:12:27 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+01:25:57 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+01:39:27 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+01:52:57 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+02:06:28 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+02:19:58 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+02:27:57 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (8330bad4-7339-4eb4-956f-199eca08b2d2)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+📥 解析 XML: /Users/mc/kimicode/ib_dashboard/uploads/flex_sync_20260411_022815_5800d4ba.xml
+   发现 22 个 FlexStatement
+🔍 扫描 Schema...
+   发现 27 种节点类型
+🗄️  初始化 PostgreSQL 表...
+📝 导入所有节点数据...
+
+✅ 导入完成
+   核心 daily_nav: 22 条
+     archive_conversion_rate: 858 条
+     archive_mtm_performance_summary_underlying: 734 条
+     archive_security_info: 664 条
+     archive_open_position: 662 条
+     archive_prior_period_position: 619 条
+     archive_net_stock_position: 487 条
+     archive_statement_of_funds_line: 116 条
+     archive_cash_report_currency: 110 条
+     archive_change_in_position_value: 110 条
+     archive_mtdytd_performance_summary_underlying: 92 条
+     archive_interest_accruals_currency: 75 条
+     archive_open_dividend_accrual: 64 条
+     archive_trade: 63 条
+     archive_tier_interest_detail: 57 条
+     archive_slb_activity: 57 条
+02:28:28 Successfully completed workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') job in 0:00:31.797809s on worker 38a53266538e458b8083f43cd46a6922
+02:28:28 default: Job OK (8330bad4-7339-4eb4-956f-199eca08b2d2)
+02:28:28 Result is kept for 500 seconds
+02:28:28 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (5824c887-f409-42a8-ab55-9c0c8df43504)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+📥 解析 XML: /Users/mc/kimicode/ib_dashboard/uploads/flex_sync_20260411_022847_5800d4ba.xml
+   发现 22 个 FlexStatement
+🔍 扫描 Schema...
+   发现 27 种节点类型
+🗄️  初始化 PostgreSQL 表...
+📝 导入所有节点数据...
+
+✅ 导入完成
+   核心 daily_nav: 22 条
+     archive_conversion_rate: 858 条
+     archive_mtm_performance_summary_underlying: 734 条
+     archive_security_info: 664 条
+     archive_open_position: 662 条
+     archive_prior_period_position: 619 条
+     archive_net_stock_position: 487 条
+     archive_statement_of_funds_line: 116 条
+     archive_cash_report_currency: 110 条
+     archive_change_in_position_value: 110 条
+     archive_mtdytd_performance_summary_underlying: 92 条
+     archive_interest_accruals_currency: 75 条
+     archive_open_dividend_accrual: 64 条
+     archive_trade: 63 条
+     archive_tier_interest_detail: 57 条
+     archive_slb_activity: 57 条
+02:29:05 Successfully completed workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') job in 0:00:36.218980s on worker 38a53266538e458b8083f43cd46a6922
+02:29:05 default: Job OK (5824c887-f409-42a8-ab55-9c0c8df43504)
+02:29:05 Result is kept for 500 seconds
+02:29:05 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (1414bbfe-0749-4814-896e-a412ceec0c2d)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+📥 解析 XML: /Users/mc/kimicode/ib_dashboard/uploads/flex_sync_20260411_023204_5800d4ba.xml
+   发现 22 个 FlexStatement
+🔍 扫描 Schema...
+   发现 27 种节点类型
+🗄️  初始化 PostgreSQL 表...
+📝 导入所有节点数据...
+
+✅ 导入完成
+   核心 daily_nav: 22 条
+     archive_conversion_rate: 858 条
+     archive_mtm_performance_summary_underlying: 734 条
+     archive_security_info: 664 条
+     archive_open_position: 662 条
+     archive_prior_period_position: 619 条
+     archive_net_stock_position: 487 条
+     archive_statement_of_funds_line: 116 条
+     archive_cash_report_currency: 110 条
+     archive_change_in_position_value: 110 条
+     archive_mtdytd_performance_summary_underlying: 92 条
+     archive_interest_accruals_currency: 75 条
+     archive_open_dividend_accrual: 64 条
+     archive_trade: 63 条
+     archive_tier_interest_detail: 57 条
+     archive_slb_activity: 57 条
+02:32:22 Successfully completed workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') job in 0:03:17.260428s on worker 38a53266538e458b8083f43cd46a6922
+02:32:22 default: Job OK (1414bbfe-0749-4814-896e-a412ceec0c2d)
+02:32:22 Result is kept for 500 seconds
+02:32:22 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+02:32:38 default: utils.backups.create_backup() (1532b8f4-bb14-43e3-b3ea-90caefe86c5a)
+02:32:38 Successfully completed utils.backups.create_backup() job in 0:00:00.007670s on worker 38a53266538e458b8083f43cd46a6922
+02:32:38 default: Job OK (1532b8f4-bb14-43e3-b3ea-90caefe86c5a)
+02:32:38 Result is kept for 500 seconds
+02:46:08 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+02:59:38 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+03:13:08 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+03:26:38 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+03:40:08 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+03:53:38 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+04:07:08 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+04:20:39 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+04:34:09 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+04:47:39 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+05:01:09 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+05:14:39 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+05:28:09 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+05:41:39 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+05:55:09 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+06:08:39 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+06:22:09 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+06:35:40 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+06:49:10 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+07:02:40 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+07:16:10 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+07:29:40 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+07:43:10 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+07:56:40 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+08:10:10 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+08:23:40 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+08:37:10 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+08:50:41 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+09:04:11 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+09:17:41 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+09:31:11 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+09:44:41 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+09:58:11 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+10:11:41 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+10:25:11 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+10:38:41 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+10:52:12 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+11:05:42 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+11:19:12 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+11:32:42 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+11:46:12 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+11:59:42 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+12:13:12 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+12:26:43 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+12:40:13 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+12:53:43 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+13:07:13 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+13:20:43 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+13:34:13 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+13:47:43 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+14:01:14 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+14:14:44 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+14:28:14 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+14:41:44 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+14:55:14 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+15:08:44 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+15:22:14 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+15:35:44 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+15:49:14 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+16:02:45 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+16:16:15 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+16:29:45 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+16:43:15 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+16:56:45 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+17:10:15 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+17:23:45 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+17:37:16 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+17:50:46 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+18:04:16 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+18:17:46 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+18:31:16 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+18:44:46 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+18:58:16 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+19:11:46 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+19:25:17 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+19:38:47 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+19:52:17 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+20:05:47 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+20:19:17 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+20:32:47 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+20:46:17 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+20:59:47 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+21:13:17 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+21:26:48 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+21:40:18 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+21:53:48 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+22:07:18 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+22:20:48 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+22:34:18 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+22:47:48 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+23:01:18 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+23:14:49 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+23:28:19 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+23:41:49 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+23:55:19 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+00:08:49 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+00:22:19 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+00:35:49 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+00:49:19 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default
+01:02:49 Worker 38a53266538e458b8083f43cd46a6922: cleaning registries for queue: default

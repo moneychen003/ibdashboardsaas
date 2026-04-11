@@ -1,0 +1,5 @@
+2026-04-09 22:41:44,465 ERROR Latest import query failed: no such table: import_audit
+2026-04-11 01:43:15,364 ERROR Latest import query failed: relation "import_audit" does not exist
+LINE 1: SELECT file_name, created_at, status FROM import_audit ORDER...
+                                                  ^
+

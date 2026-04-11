@@ -1,0 +1,31 @@
+21:36:51 Worker b4d843e02b7f4b7eac07b62b95afa01d: started with PID 10413, version 2.7.0
+21:36:51 Worker b4d843e02b7f4b7eac07b62b95afa01d: subscribing to channel rq:pubsub:b4d843e02b7f4b7eac07b62b95afa01d
+21:36:51 *** Listening on default...
+21:36:51 Worker b4d843e02b7f4b7eac07b62b95afa01d: cleaning registries for queue: default
+21:50:21 Worker b4d843e02b7f4b7eac07b62b95afa01d: cleaning registries for queue: default
+21:53:09 default: workers.jobs.import_xml_job('5800d4ba-84f1-453b-9238-101462eaf139', 'c5a44911-e062-4c28-9361-09228aae4602', '/Users/mc/kimicode/ib_dashboard/uploads/upload_20260410_215309_ib_history....) (93fef1a7-c1ec-4950-bdff-6d9f77bf00bf)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+objc[13664]: +[NSCharacterSet initialize] may have been in progress in another thread when fork() was called.
+objc[13664]: +[NSCharacterSet initialize] may have been in progress in another thread when fork() was called. We cannot safely call it or ignore it in the fork() child process. Crashing instead. Set a breakpoint on objc_initializeAfterForkError to debug.
+21:53:09 Worker b4d843e02b7f4b7eac07b62b95afa01d: job 93fef1a7-c1ec-4950-bdff-6d9f77bf00bf failed (Work-horse terminated unexpectedly; waitpid returned 6 (signal 6); )
+21:53:09 Work horse killed for job 93fef1a7-c1ec-4950-bdff-6d9f77bf00bf: retpid=13664, ret_val=6
+22:06:39 Worker b4d843e02b7f4b7eac07b62b95afa01d: cleaning registries for queue: default
+22:17:04 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (bcd4219d-89de-435c-8592-3133fc0a5c48)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+objc[23044]: +[NSCharacterSet initialize] may have been in progress in another thread when fork() was called.
+objc[23044]: +[NSCharacterSet initialize] may have been in progress in another thread when fork() was called. We cannot safely call it or ignore it in the fork() child process. Crashing instead. Set a breakpoint on objc_initializeAfterForkError to debug.
+22:17:05 Worker b4d843e02b7f4b7eac07b62b95afa01d: job bcd4219d-89de-435c-8592-3133fc0a5c48 failed (Work-horse terminated unexpectedly; waitpid returned 6 (signal 6); )
+22:17:05 Work horse killed for job bcd4219d-89de-435c-8592-3133fc0a5c48: retpid=23044, ret_val=6
+22:17:05 Worker b4d843e02b7f4b7eac07b62b95afa01d: cleaning registries for queue: default
+22:29:57 default: workers.jobs.flex_sync_job('5800d4ba-84f1-453b-9238-101462eaf139') (34819391-4394-4770-84dc-84c40b5d87e2)
+/Users/mc/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+objc[32298]: +[NSCharacterSet initialize] may have been in progress in another thread when fork() was called.
+objc[32298]: +[NSCharacterSet initialize] may have been in progress in another thread when fork() was called. We cannot safely call it or ignore it in the fork() child process. Crashing instead. Set a breakpoint on objc_initializeAfterForkError to debug.
+22:29:57 Worker b4d843e02b7f4b7eac07b62b95afa01d: job 34819391-4394-4770-84dc-84c40b5d87e2 failed (Work-horse terminated unexpectedly; waitpid returned 6 (signal 6); )
+22:29:57 Work horse killed for job 34819391-4394-4770-84dc-84c40b5d87e2: retpid=32298, ret_val=6
+22:29:57 Worker b4d843e02b7f4b7eac07b62b95afa01d: cleaning registries for queue: default
+22:30:42 Worker b4d843e02b7f4b7eac07b62b95afa01d [PID 10413]: warm shut down requested
+22:30:42 Worker b4d843e02b7f4b7eac07b62b95afa01d: unsubscribing from channel rq:pubsub:b4d843e02b7f4b7eac07b62b95afa01d

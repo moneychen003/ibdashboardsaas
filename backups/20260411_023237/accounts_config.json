@@ -1,0 +1,32 @@
+{
+  "accounts": [
+    {
+      "id": "combined",
+      "name": "合并总资产",
+      "accountId": "COMBINED",
+      "dataFile": "dashboard_combined.json",
+      "color": "#000000",
+      "isDefault": true
+    },
+    {
+      "id": "u12672188",
+      "name": "主账户 U12672188",
+      "accountId": "U12672188",
+      "dataFile": "dashboard_U12672188.json",
+      "color": "#6366f1",
+      "isDefault": false
+    },
+    {
+      "id": "u11181997",
+      "name": "历史账户 U11181997",
+      "accountId": "U11181997",
+      "dataFile": "dashboard_U11181997.json",
+      "color": "#10b981",
+      "isDefault": false
+    }
+  ],
+  "aggregation": {
+    "enabled": true,
+    "showCombined": true
+  }
+}
