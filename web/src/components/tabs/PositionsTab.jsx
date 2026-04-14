@@ -46,7 +46,7 @@ function parseOptionFromSymbol(symbol = '', description = '') {
     const mon = code.substring(2, 4);
     const day = code.substring(4, 6);
     putCall = code.substring(6, 7).toUpperCase();
-    strike = parseFloat(code.substring(7)) || 0;
+    strike = (parseFloat(code.substring(7)) || 0) / 1000;
     expiry = `${yr}-${mon}-${day}`;
   }
 
@@ -144,28 +144,57 @@ function OptionExpiry({ options }) {
     const underlying = parsed.underlying || p.symbol?.split(' ')[0] || '';
     const parsedDate = expiryStr ? parseDate(expiryStr) : null;
     const days = parsedDate && !isNaN(parsedDate) ? Math.max(0, Math.ceil((parsedDate - new Date()) / 86400000)) : 999;
-    opts.push({ symbol: underlying, rawSymbol: p.symbol || underlying, type: putCall === 'C' ? 'Call' : 'Put', expiry: expiryStr, strike, days, value: p.positionValue || 0, pnl: p.fifoPnlUnrealized || 0 });
+    const posValue = p.positionValue || 0;
+    const markPrice = p.markPrice || 0;
+    const estPnl = p.estimatedPnl || 0;
+    const netPremium = p.netPremium != null ? p.netPremium : (estPnl - posValue);
+    const premiumPerContract = p.premiumPerContract != null ? p.premiumPerContract : (netPremium && p.contracts ? netPremium / p.contracts : 0);
+    const premiumPerShare = p.premiumPerShare != null ? p.premiumPerShare : (netPremium && p.contracts ? netPremium / p.contracts / 100 : 0);
+    const calculatedContracts = markPrice ? Math.round(Math.abs(posValue) / Math.abs(markPrice) / 100) : 0;
+    const contracts = p.contracts || calculatedContracts;
+
+    opts.push({
+        symbol: underlying,
+        rawSymbol: p.symbol || underlying,
+        type: putCall === 'C' ? 'Call' : 'Put',
+        expiry: expiryStr,
+        strike,
+        days,
+        markPrice,
+        premiumPerShare,
+        contracts,
+        costBasis: netPremium,
+        premiumPerContract,
+        netPremium,
+        value: posValue,
+        pnl: estPnl
+      });
   });
   if (!opts.length) return <p className="text-sm text-[var(--gray)]">暂无期权到期数据</p>;
   opts.sort((a, b) => a.days - b.days);
 
   return (
     <div>
-      <div className="mb-2 grid grid-cols-[60px_80px_60px_1fr_80px_90px_90px] gap-3 rounded-t-lg bg-[var(--lighter-gray)] px-4 py-2 text-xs font-semibold text-[var(--gray)]">
+      <div className="mb-2 grid grid-cols-[50px_70px_50px_1fr_50px_70px_80px_60px_80px_85px_85px_85px] gap-2 rounded-t-lg bg-[var(--lighter-gray)] px-3 py-2 text-xs font-semibold text-[var(--gray)]">
         <div className="text-center">天数</div>
         <div>标的</div>
         <div>类型</div>
         <div>详情</div>
+        <div className="text-center">张数</div>
         <div className="text-right">行权价</div>
+        <div className="text-right">成本基础</div>
+        <div className="text-right">现价</div>
+        <div className="text-right">权益金</div>
+        <div className="text-right">权益金现金</div>
         <div className="text-right">市值</div>
-        <div className="text-right">盈亏</div>
+        <div className="text-right">未实现盈亏</div>
       </div>
       {opts.map((o, i) => {
         const urgent = o.days <= 7;
         return (
           <div
             key={i}
-            className={`grid grid-cols-[60px_80px_60px_1fr_80px_90px_90px] gap-3 border-b border-[var(--lighter-gray)] px-4 py-3 text-sm ${urgent ? 'bg-red-50' : ''}`}
+            className={`grid grid-cols-[50px_70px_50px_1fr_50px_70px_80px_60px_80px_85px_85px_85px] gap-2 border-b border-[var(--lighter-gray)] px-3 py-3 text-sm ${urgent ? 'bg-red-50' : ''}`}
           >
             <div className={`text-center font-bold ${urgent ? 'text-[var(--danger)]' : 'text-[var(--gray)]'}`}>{o.days}天</div>
             <div>
@@ -178,7 +207,12 @@ function OptionExpiry({ options }) {
               </span>
             </div>
             <div className="text-xs text-[var(--gray)]">到期：{fmtDate(o.expiry)}</div>
+            <div className="text-center text-sm font-medium">{o.contracts}</div>
             <div className="text-right text-sm">${fmtNum(o.strike, 0)}</div>
+            <div className="text-right text-sm font-medium">{fmtCur(o.costBasis)}</div>
+            <div className="text-right text-sm font-medium">{fmtCur(o.markPrice)}</div>
+            <div className="text-right text-sm font-medium">{fmtCur(o.premiumPerShare)}</div>
+            <div className="text-right text-sm font-medium">{fmtCur(o.netPremium)}</div>
             <div className="text-right text-sm font-medium">{fmtCur(o.value)}</div>
             <div className={`text-right text-sm font-medium ${o.pnl >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>{fmtCur(o.pnl)}</div>
           </div>
@@ -329,10 +363,11 @@ export default function PositionsTab() {
           </div>
           <PositionPie positions={allPositions} mode={pieMode} totalCash={totalCash} />
         </Card>
-        <Card title="⚠️ 期权到期提醒">
-          <OptionExpiry options={data.openPositions?.options || []} />
-        </Card>
       </div>
+
+      <Card title="⚠️ 期权到期提醒">
+        <OptionExpiry options={data.openPositions?.options || []} />
+      </Card>
 
       <Card title="持仓明细">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

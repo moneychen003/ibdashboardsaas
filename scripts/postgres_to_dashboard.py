@@ -26,6 +26,15 @@ def _convert_value(v):
         return float(v)
     if isinstance(v, (date, datetime)):
         return v.isoformat()
+    if isinstance(v, uuid.UUID):
+        return str(v)
+    # yfinance/pandas 导入后可能引入 numpy 类型
+    try:
+        import numpy as np
+        if isinstance(v, np.generic):
+            return v.item()
+    except Exception:
+        pass
     return v
 
 

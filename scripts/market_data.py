@@ -17,9 +17,11 @@ CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 MARKET_SETTINGS_FILE = os.path.join(CONFIG_DIR, "market_data_settings.json")
 
 DEFAULT_SETTINGS = {
-    "sources": ["finnhub", "yahoo"],
+    "sources": ["finnhub", "yahoo", "webull", "tradier"],
     "finnhub": {"enabled": True, "api_key": os.environ.get("FINNHUB_API_KEY", "")},
     "yahoo": {"enabled": True, "api_key": ""},
+    "webull": {"enabled": True, "api_key": ""},
+    "tradier": {"enabled": False, "api_key": ""},
     "polygon": {"enabled": False, "api_key": ""},
     "alpaca": {"enabled": False, "api_key": ""}
 }
@@ -111,8 +113,67 @@ def _fetch_finnhub_prices(symbols, api_key):
     return prices
 
 
+def _fetch_yahoo_option_prices(option_symbols):
+    """使用 yfinance 1.2+ 获取期权实时价格（通过 option_chain）。"""
+    prices = {}
+    if not option_symbols:
+        return prices
+    try:
+        import yfinance as yf
+    except ImportError:
+        print("[market] yfinance not installed, skipping Yahoo options")
+        return prices
+
+    from collections import defaultdict
+
+    def _parse_ib_option(sym):
+        parts = sym.strip().split()
+        if len(parts) != 2:
+            return None
+        underlying = parts[0]
+        code = parts[1]
+        if len(code) < 15:
+            return None
+        yr = '20' + code[0:2]
+        mon = code[2:4]
+        day = code[4:6]
+        pc = code[6].upper()
+        strike = int(code[7:]) / 1000
+        expiry = f"{yr}-{mon}-{day}"
+        return underlying, expiry, strike, pc
+
+    groups = defaultdict(list)
+    for sym in option_symbols:
+        parsed = _parse_ib_option(sym)
+        if parsed:
+            groups[(parsed[0], parsed[1])].append((sym, parsed[2], parsed[3]))
+
+    for (underlying, expiry), opts in groups.items():
+        try:
+            chain = yf.Ticker(underlying).option_chain(expiry)
+            for sym, strike, pc in opts:
+                df = chain.puts if pc == 'P' else chain.calls
+                row = df[df['strike'] == strike]
+                if not row.empty:
+                    last = float(row['lastPrice'].values[0])
+                    bid = float(row['bid'].values[0]) if row['bid'].values[0] is not None else 0
+                    ask = float(row['ask'].values[0]) if row['ask'].values[0] is not None else 0
+                    price = last
+                    if bid > 0 and ask > 0:
+                        midpoint = round((bid + ask) / 2, 2)
+                        if price == 0 or price != price or abs(price - midpoint) > midpoint * 0.5:
+                            price = midpoint
+                    if (price == 0 or price != price) and bid > 0 and ask > 0:
+                        price = round((bid + ask) / 2, 2)
+                    if price > 0:
+                        prices[sym] = price
+        except Exception as e:
+            print(f"[market] Yahoo option error for {underlying} {expiry}: {e}")
+    return prices
+
+
 def _fetch_yahoo_prices(symbols):
-    """Fallback using yfinance batch download (much faster than per-ticker .info)."""
+    """使用 yfinance 获取股价，优先取盘后/盘前价，否则取常规收盘价。"""
     prices = {}
     if not symbols:
         return prices
@@ -122,6 +183,7 @@ def _fetch_yahoo_prices(symbols):
         print("[market] yfinance not installed, skipping Yahoo fallback")
         return prices
 
+    # 1. 批量获取常规收盘价作为 fallback
     try:
         df = yf.download(
             symbols,
@@ -131,8 +193,6 @@ def _fetch_yahoo_prices(symbols):
             progress=False,
             threads=True,
         )
-        # yfinance returns a MultiIndex DataFrame for multiple tickers,
-        # and a flat DataFrame for a single ticker.
         if len(symbols) == 1:
             sym = symbols[0]
             try:
@@ -147,10 +207,30 @@ def _fetch_yahoo_prices(symbols):
                     last = df[sym]["Close"].dropna().iloc[-1]
                     if float(last) > 0:
                         prices[sym] = float(last)
-                except Exception as e:
-                    print(f"[market] Yahoo error for {sym}: {e}")
+                except Exception:
+                    pass
     except Exception as e:
         print(f"[market] Yahoo batch error: {e}")
+
+    # 2. 逐个尝试获取盘后/盘前价并覆盖
+    extended_count = 0
+    for sym in symbols:
+        try:
+            ticker = yf.Ticker(sym)
+            info = ticker.info
+            ext_price = None
+            if info.get("postMarketPrice"):
+                ext_price = float(info["postMarketPrice"])
+            elif info.get("preMarketPrice"):
+                ext_price = float(info["preMarketPrice"])
+            if ext_price and ext_price > 0:
+                prices[sym] = ext_price
+                extended_count += 1
+        except Exception:
+            pass
+
+    if extended_count:
+        print(f"[market] Yahoo extended-hours prices for {extended_count} symbols")
     return prices
 
 
@@ -173,6 +253,77 @@ def _fetch_polygon_prices(symbols, api_key):
                     prices[sym] = float(price)
         except Exception as e:
             print(f"[market] Polygon error for {sym}: {e}")
+    return prices
+
+
+def _fetch_webull_prices(symbols):
+    """使用 webull 非官方库获取美股/中概股实时价格（无需 API Key）。"""
+    prices = {}
+    if not symbols:
+        return prices
+    try:
+        from webull import webull
+    except ImportError:
+        print("[market] webull not installed, skipping Webull fallback")
+        return prices
+    wb = webull()
+    for sym in symbols:
+        try:
+            resp = wb.get_quote(sym)
+            price = resp.get('close')
+            if price is not None and float(price) > 0:
+                prices[sym] = float(price)
+        except Exception as e:
+            print(f"[market] Webull error for {sym}: {e}")
+    return prices
+
+
+def _fetch_tradier_prices(symbols, api_key):
+    """Tradier API：支持美股/ETF/期权实时行情。免费个人账户可用。"""
+    prices = {}
+    if not api_key or not symbols:
+        return prices
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    base_url = "https://api.tradier.com/v1/markets/quotes"
+
+    def _to_tradier_sym(sym):
+        # IB symbol: "AAPL 260417C00250000" -> Tradier: "AAPL260417C00250000"
+        if " " in sym and len(sym.split(" ", 1)[1]) >= 7:
+            return sym.replace(" ", "")
+        return sym
+
+    batch = ",".join([_to_tradier_sym(s) for s in symbols])
+    try:
+        resp = requests.get(base_url, params={"symbols": batch}, headers=headers, timeout=15)
+        data = resp.json()
+        quotes = data.get("quotes", {})
+        quote_list = quotes.get("quote", [])
+        if isinstance(quote_list, dict):
+            quote_list = [quote_list]
+        for q in quote_list:
+            sym = q.get("symbol", "").replace(" ", "")
+            # 优先 last，fallback bid/ask midpoint
+            price = q.get("last")
+            if price is None:
+                bid = safe_float(q.get("bid"))
+                ask = safe_float(q.get("ask"))
+                if bid and ask:
+                    price = round((bid + ask) / 2, 2)
+            if price is not None and float(price) > 0:
+                # Tradier 期权 symbol 格式是 AAPL260417C00250000，加回空格和 IB 对齐
+                ib_sym = sym
+                if len(sym) > 15 and any(c in sym for c in ["C", "P"]):
+                    # AAPL260417C00250000 -> AAPL 260417C00250000
+                    idx = 0
+                    for i, ch in enumerate(sym):
+                        if ch.isdigit():
+                            idx = i
+                            break
+                    if idx > 0:
+                        ib_sym = sym[:idx] + " " + sym[idx:]
+                prices[ib_sym] = float(price)
+    except Exception as e:
+        print(f"[market] Tradier batch error: {e}")
     return prices
 
 
@@ -255,6 +406,17 @@ def update_market_prices(user_id=None):
                 prices = _fetch_yahoo_prices(missing)
             elif src_name == "polygon":
                 prices = _fetch_polygon_prices(missing, src_cfg.get("api_key", ""))
+            elif src_name == "webull":
+                prices = _fetch_webull_prices(missing)
+            elif src_name == "tradier":
+                equity_missing = [s for s in symbols if s not in fetched]
+                option_rows = execute(
+                    "SELECT DISTINCT symbol FROM positions WHERE user_id = %s AND asset_type = 'OPTION'",
+                    (uid,),
+                )
+                option_symbols = [r["symbol"] for r in option_rows if r["symbol"]]
+                all_missing = equity_missing + option_symbols
+                prices = _fetch_tradier_prices(all_missing, src_cfg.get("api_key", ""))
             elif src_name == "alpaca":
                 prices = _fetch_alpaca_prices(missing, src_cfg.get("api_key", ""))
             else:
@@ -262,21 +424,115 @@ def update_market_prices(user_id=None):
             for sym, price in prices.items():
                 fetched[sym] = (price, src_name)
 
-        # Write to DB
+        # Write to DB (personal mode: ignore user_id in PK)
         with get_cursor() as cur:
+            # 动态检测 market_prices 主键，以适配不同 schema
+            try:
+                cur.execute("""
+                    SELECT a.attname
+                    FROM pg_index i
+                    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                    WHERE i.indrelid = 'market_prices'::regclass
+                      AND i.indisprimary
+                    ORDER BY array_position(i.indkey, a.attnum)
+                """)
+                pk_cols = [r[0] for r in cur.fetchall()]
+                conflict_target = ", ".join(f'"{c}"' for c in pk_cols) if pk_cols else '"symbol"'
+            except Exception:
+                conflict_target = '"symbol"'
+
             for sym, (price, src_name) in fetched.items():
                 cur.execute(
-                    """
-                    INSERT INTO market_prices (user_id, symbol, price, updated_at, source)
-                    VALUES (%s, %s, %s, NOW(), %s)
-                    ON CONFLICT (user_id, symbol) DO UPDATE SET
+                    f"""
+                    INSERT INTO market_prices (symbol, price, updated_at, source, user_id)
+                    VALUES (%s, %s, NOW(), %s, %s)
+                    ON CONFLICT ({conflict_target}) DO UPDATE SET
                         price = EXCLUDED.price,
                         updated_at = EXCLUDED.updated_at,
-                        source = EXCLUDED.source
+                        source = EXCLUDED.source,
+                        user_id = EXCLUDED.user_id
                     """,
-                    (uid, sym, price, src_name),
+                    (sym, price, src_name, uid),
                 )
-        print(f"[market] Updated {len(fetched)} prices for {uid}.")
+
+        print(f"[market] Updated {len(fetched)} equity prices for {uid}.")
+
+        # Update option prices via Yahoo Finance option chains
+        option_rows = execute(
+            "SELECT DISTINCT symbol FROM positions WHERE user_id = %s AND asset_type = 'OPTION'",
+            (uid,)
+        )
+        option_symbols = [r["symbol"] for r in option_rows if r["symbol"]]
+        if option_symbols:
+            print(f"[market] Updating {len(option_symbols)} option prices via Yahoo for {uid}...")
+            option_prices = _fetch_yahoo_option_prices(option_symbols)
+            if option_prices:
+                with get_cursor() as cur:
+                    for sym, price in option_prices.items():
+                        cur.execute(
+                            f"""
+                            INSERT INTO market_prices (symbol, price, updated_at, source, user_id)
+                            VALUES (%s, %s, NOW(), %s, %s)
+                            ON CONFLICT ({conflict_target}) DO UPDATE SET
+                                price = EXCLUDED.price,
+                                updated_at = EXCLUDED.updated_at,
+                                source = EXCLUDED.source,
+                                user_id = EXCLUDED.user_id
+                            """,
+                            (sym, price, "yahoo-options", uid),
+                        )
+                print(f"[market] Updated {len(option_prices)} option prices for {uid}.")
+
+        if fetched:
+            _regenerate_dashboards_for_user(uid)
+            _invalidate_dashboard_cache(uid)
+
+
+def _regenerate_dashboards_for_user(user_id):
+    """股价更新后自动重新生成 Dashboard JSON。"""
+    import json
+    import os
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+    os.makedirs(data_dir, exist_ok=True)
+    try:
+        from scripts import postgres_to_dashboard as pgdash
+        from db.postgres_client import execute
+        rows = execute("SELECT DISTINCT account_id FROM daily_nav WHERE user_id = %s", (user_id,))
+        aliases = [r['account_id'] for r in rows] if rows else []
+        for alias in aliases:
+            try:
+                data = pgdash.generate_dashboard_data(user_id, alias)
+                if data:
+                    path = os.path.join(data_dir, f"dashboard_{alias}_{user_id}.json")
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+                    print(f"[market] Regenerated dashboard for {alias}")
+            except Exception as e:
+                print(f"[market] Dashboard regen failed for {alias}: {e}")
+        # combined
+        try:
+            data = pgdash.generate_dashboard_data(user_id, 'combined')
+            if data:
+                path = os.path.join(data_dir, f"dashboard_combined_{user_id}.json")
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+                print(f"[market] Regenerated dashboard for combined")
+        except Exception as e:
+            print(f"[market] Dashboard regen failed for combined: {e}")
+    except Exception as e:
+        print(f"[market] Dashboard regen error: {e}")
+
+
+def _invalidate_dashboard_cache(user_id):
+    """清除 Redis 中的 dashboard 缓存。"""
+    try:
+        import redis
+        redis_conn = redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+        pattern = f"dashboard:{user_id}:*"
+        for key in redis_conn.scan_iter(match=pattern):
+            redis_conn.delete(key)
+    except Exception:
+        pass
 
 
 def scheduled_update_all():

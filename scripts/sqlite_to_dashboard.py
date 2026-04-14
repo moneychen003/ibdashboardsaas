@@ -604,7 +604,28 @@ def _calc_cost_basis_for_account(conn, account_id):
             net_proceeds = cost_avg - comm - tax
             events.append({'symbol': symbol, 'type': 'SELL', 'qty': qty, 'cost_avg': cost_avg, 'cost_diluted': cost_avg, 'net_proceeds': net_proceeds, 'date': date or '1900-01-01'})
 
-    # 3. 补充未匹配的 Option Assignment
+    # 3. 读取期权交易（BUY/SELL 都算入成本基础）
+    cursor.execute(f'''
+        SELECT t.symbol, t.buy_sell, t.quantity, t.trade_price, t.trade_money, t.ib_commission, t.taxes, t.trade_date
+        FROM archive_trade t
+        WHERE {where_trade} AND t.asset_category = 'OPT'
+        ORDER BY t.trade_date
+    ''', params)
+    for row in cursor.fetchall():
+        symbol, bs, qty, price, trade_money, commission, taxes, date = row
+        qty = abs(safe_float(qty))
+        tm = safe_float(trade_money)
+        comm = abs(safe_float(commission)) if commission else 0
+        tax = abs(safe_float(taxes)) if taxes else 0
+        if bs == 'BUY':
+            cost_avg = abs(tm) + comm + tax
+            events.append({'symbol': symbol, 'type': 'BUY', 'qty': qty, 'cost_avg': cost_avg, 'cost_diluted': cost_avg, 'net_proceeds': 0, 'date': date or '1900-01-01'})
+        else:
+            cost_avg = abs(tm)
+            net_proceeds = cost_avg - comm - tax
+            events.append({'symbol': symbol, 'type': 'SELL', 'qty': qty, 'cost_avg': cost_avg, 'cost_diluted': cost_avg, 'net_proceeds': net_proceeds, 'date': date or '1900-01-01'})
+
+    # 4. 补充未匹配的 Option Assignment
     for key, assigns in assignments_by_date_sym.items():
         symbol = key[0]
         date = key[1]
@@ -618,7 +639,7 @@ def _calc_cost_basis_for_account(conn, account_id):
                 cost_diluted = a['strike'] * a['shares'] + abs(a['premium'])
                 events.append({'symbol': symbol, 'type': 'BUY', 'qty': a['shares'], 'cost_avg': cost_avg, 'cost_diluted': cost_diluted, 'net_proceeds': 0, 'date': date or '1900-01-01'})
 
-    # 4. 读取转入记录
+    # 5. 读取转入记录
     cursor.execute(f'''
         SELECT symbol, direction, quantity, position_amount, date
         FROM archive_transfer
@@ -842,6 +863,7 @@ def get_latest_positions(conn, account_id=None):
     # Best-effort 期权盈亏估算（基于 archive_trade proceeds 累计净现金流 + 当前市值）
     option_symbols = [row[0] for row in processed_rows if row[2] == 'OPTION']
     option_pnl_map = {}
+    option_avg_price_map = {}
     if option_symbols:
         placeholders = ','.join(['?'] * len(option_symbols))
         where_acc = 'stmt_account_id = ?' if account_id else '1=1'
@@ -854,6 +876,26 @@ def get_latest_positions(conn, account_id=None):
             GROUP BY symbol
         ''', tuple(params))
         option_pnl_map = {r[0]: safe_float(r[1]) for r in cursor.fetchall()}
+        # 计算原始开仓的平均每股权益金（不受平仓/行权影响）
+        # 兼容 quantity 为股数或张数两种单位：
+        # 若 proceeds/quantity ≈ trade_price，则为股数；否则为张数（需乘100）
+        cursor.execute(f'''
+            SELECT symbol,
+                   CASE WHEN SUM(ABS(CAST(quantity AS REAL))) > 0
+                        THEN SUM(CAST(proceeds AS REAL)) /
+                             SUM(CASE
+                                 WHEN ABS(CAST(proceeds AS REAL)) / NULLIF(ABS(CAST(quantity AS REAL)), 0)
+                                      BETWEEN CAST(trade_price AS REAL) * 0.9 AND CAST(trade_price AS REAL) * 1.1
+                                 THEN ABS(CAST(quantity AS REAL))
+                                 ELSE ABS(CAST(quantity AS REAL)) * 100
+                             END)
+                        ELSE 0
+                   END as avg_premium_per_share
+            FROM archive_trade
+            WHERE {where_acc} AND asset_category = 'OPT' AND buy_sell = 'SELL' AND symbol IN ({placeholders})
+            GROUP BY symbol
+        ''', tuple(params))
+        option_avg_price_map = {r[0]: safe_float(r[1]) for r in cursor.fetchall()}
 
     # 拉取实时价格覆盖
     live_price_map = {}
@@ -894,8 +936,35 @@ def get_latest_positions(conn, account_id=None):
             qty = old_pv / old_mp if old_mp else 0
             item['positionValue'] = round(qty * live_price, 2)
             item['markPrice'] = round(live_price, 4)
+        if live_price and row[2] == 'OPTION':
+            old_pv = safe_float(row[3]) if row[3] is not None else 0
+            old_mp = safe_float(row[4]) if row[4] is not None else 0
+            contracts = old_pv / old_mp / 100 if old_mp else 0
+            item['positionValue'] = round(contracts * live_price * 100, 2)
+            item['markPrice'] = round(live_price, 4)
         if row[2] == 'OPTION':
-            item['estimatedPnl'] = round(option_pnl_map.get(symbol, 0) + safe_float(row[3]), 2)
+            # 使用实时价格覆盖后的 positionValue 计算 estimatedPnl
+            current_pv = item.get('positionValue', safe_float(row[3]) if row[3] is not None else 0)
+            mp = item.get('markPrice', safe_float(row[4]) if row[4] is not None else 0)
+            pv = item.get('positionValue', safe_float(row[3]) if row[3] is not None else 0)
+            contracts = round(abs(pv) / abs(mp) / 100, 0) if mp else 0
+            item['contracts'] = contracts
+            # 权益金计算：使用原始开仓平均价，不受平仓/行权影响
+            avg_premium_per_share = option_avg_price_map.get(symbol, 0)
+            if avg_premium_per_share > 0 and contracts > 0:
+                premium_per_contract = avg_premium_per_share * 100
+                net_premium = premium_per_contract * contracts
+                item['premiumPerShare'] = round(avg_premium_per_share, 4)
+                item['premiumPerContract'] = round(premium_per_contract, 2)
+                item['netPremium'] = round(net_premium, 2)
+                item['estimatedPnl'] = round(net_premium + current_pv, 2)
+            else:
+                # fallback 到旧逻辑
+                net_premium = option_pnl_map.get(symbol, 0)
+                item['estimatedPnl'] = round(net_premium + current_pv, 2)
+                item['netPremium'] = round(net_premium, 2)
+                item['premiumPerContract'] = round(net_premium / contracts, 2) if contracts else 0
+                item['premiumPerShare'] = round(net_premium / contracts / 100, 4) if contracts else 0
         if row[2] == 'ETF':
             etfs.append(item)
         elif row[2] == 'OPTION':
@@ -2960,11 +3029,38 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
     }
 
     # 如果存在实时市场价格，将 asOfDate 更新为当前时间（精确到分钟）
+    # 并基于 positions 表单独计算股价变动对净值的净影响，只调整 netLiquidation
     try:
         _cur = conn.cursor()
         _cur.execute("SELECT 1 FROM market_prices LIMIT 1")
         if _cur.fetchone():
             latest_date = datetime.now().strftime('%Y-%m-%d %H:%M')
+            try:
+                _cur.execute("SELECT symbol, price FROM market_prices")
+                mp_map = {r[0]: safe_float(r[1]) for r in _cur.fetchall() if r[1] is not None}
+                _cur.execute(
+                    "SELECT symbol, asset_type, position_value, position_value_in_base, mark_price "
+                    "FROM positions WHERE date = (SELECT MAX(date) FROM positions)"
+                )
+                delta = 0.0
+                for sym, at, pv, pv_base, mp in _cur.fetchall():
+                    pv = safe_float(pv)
+                    pv_base = safe_float(pv_base)
+                    mp = safe_float(mp)
+                    live_price = mp_map.get(sym)
+                    if live_price and at in ('STOCK', 'ETF') and pv and mp:
+                        qty = pv / mp
+                        fx = pv_base / pv if pv else 1.0
+                        live_pv_base = qty * live_price * fx
+                        delta += live_pv_base - pv_base
+                    elif live_price and at == 'OPTION' and pv and mp:
+                        contracts = pv / mp / 100
+                        fx = pv_base / pv if pv else 1.0
+                        live_pv_base = contracts * live_price * 100 * fx
+                        delta += live_pv_base - pv_base
+                balance_breakdown['netLiquidation'] = round(balance_breakdown['netLiquidation'] + delta, 2)
+            except Exception:
+                pass
     except Exception:
         pass
 
