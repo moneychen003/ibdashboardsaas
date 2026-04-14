@@ -54,52 +54,7 @@ function parseOptionFromSymbol(symbol = '', description = '') {
 }
 
 function PositionPie({ positions, mode, totalCash }) {
-  const groups = {};
-  // 统一转换为基准货币金额，确保多币种组合时饼图比例正确
-  const toBase = (p) => Math.abs((p.positionValue || 0) * (p.fxRateToBase != null ? p.fxRateToBase : 1));
-
-  if (mode === 'options') {
-    positions.forEach((p) => {
-      if ((p.assetType || p.assetCategory || '').toUpperCase() === 'OPTION') {
-        const label = p.symbol || '其他';
-        const val = toBase(p);
-        if (val > 0.01) {
-          groups[label] = (groups[label] || 0) + val;
-        }
-      }
-    });
-  } else if (mode === 'symbols') {
-    const symbolMap = {};
-    positions.forEach((p) => {
-      const type = p.assetType || p.assetCategory || '';
-      if (type === 'STOCK' || type === 'ETF' || type === 'OPTION') {
-        const label = p.symbol || '其他';
-        const val = toBase(p);
-        if (val > 0.01) {
-          symbolMap[label] = (symbolMap[label] || 0) + val;
-        }
-      }
-    });
-    const sorted = Object.entries(symbolMap).sort((a, b) => b[1] - a[1]);
-    const top = sorted.slice(0, 12);
-    const other = sorted.slice(12).reduce((s, [, v]) => s + v, 0);
-    top.forEach(([name, val]) => (groups[name] = val));
-    if (other > 0.01) groups['其他'] = other;
-  } else {
-    const cats = {
-      股票: positions.filter((p) => (p.assetType || p.assetCategory) === 'STOCK'),
-      ETF: positions.filter((p) => (p.assetType || p.assetCategory) === 'ETF'),
-      期权: positions.filter((p) => (p.assetType || p.assetCategory) === 'OPTION'),
-      现金: [{ positionValue: totalCash, fxRateToBase: 1 }],
-    };
-    Object.entries(cats).forEach(([label, arr]) => {
-      const sum = arr.reduce((s, p) => s + toBase(p), 0);
-      if (sum > 0.01) {
-        groups[label] = sum;
-      }
-    });
-  }
-
+  const groups = usePieGroups(positions, mode, totalCash);
   const data = Object.entries(groups).map(([name, value]) => ({ name, value }));
   const colors = ['#000000', '#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316'];
 
@@ -130,6 +85,62 @@ function PositionPie({ positions, mode, totalCash }) {
   return (
     <div style={{ height: 280, position: 'relative' }}>
       <ECharts option={option} style={{ height: 280 }} />
+    </div>
+  );
+}
+
+function PositionPieStats({ positions, mode, totalCash }) {
+  const groups = usePieGroups(positions, mode, totalCash);
+  const total = Object.values(groups).reduce((s, v) => s + v, 0);
+  const colors = { 股票: '#000000', ETF: '#6366f1', 期权: '#ef4444', 现金: '#10b981' };
+
+  const todayPnl = positions.reduce((s, p) => s + (p.dailyPnl || 0), 0);
+  const unrealizedPnl = positions.reduce((s, p) => s + (p.unrealizedPnl || 0), 0);
+  const pnl = todayPnl !== 0 ? todayPnl : unrealizedPnl;
+  const pnlLabel = todayPnl !== 0 ? '今日盈亏' : '未实现盈亏';
+  const pnlPositive = pnl >= 0;
+
+  const items = Object.entries(groups)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, value]) => ({
+      name,
+      value,
+      pct: total > 0 ? (value / total) * 100 : 0,
+      color: colors[name] || '#94a3b8',
+    }));
+
+  return (
+    <div className="flex h-full flex-col justify-between">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="rounded-lg border border-[var(--light-gray)] p-4">
+          <div className="text-xs text-[var(--gray)]">总持仓市值</div>
+          <div className="mt-1 text-lg font-semibold">{fmtCur(total)}</div>
+        </div>
+        <div className="rounded-lg border border-[var(--light-gray)] p-4">
+          <div className="text-xs text-[var(--gray)]">{pnlLabel}</div>
+          <div className={`mt-1 text-lg font-semibold ${pnlPositive ? 'text-green-600' : 'text-red-500'}`}>
+            {pnlPositive ? '+' : ''}{fmtCur(pnl)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex-1 overflow-auto">
+        <div className="mb-2 text-xs font-medium text-[var(--gray)]">分类明细</div>
+        <div className="space-y-2">
+          {items.map((it) => (
+            <div key={it.name} className="flex items-center justify-between text-sm">
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: it.color }} />
+                <span className="text-[var(--dark)]">{it.name}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="font-medium">{fmtCur(it.value)}</span>
+                <span className="w-12 text-right text-xs text-[var(--gray)]">{it.pct.toFixed(2)}%</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -362,6 +373,9 @@ export default function PositionsTab() {
             ))}
           </div>
           <PositionPie positions={allPositions} mode={pieMode} totalCash={totalCash} />
+        </Card>
+        <Card title="持仓概览">
+          <PositionPieStats positions={allPositions} mode={pieMode} totalCash={totalCash} />
         </Card>
       </div>
 
