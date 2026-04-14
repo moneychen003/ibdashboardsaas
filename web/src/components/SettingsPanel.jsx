@@ -9,6 +9,7 @@ const TABS = [
   { id: 'backups', label: '备份恢复' },
   { id: 'accounts', label: '账户与货币' },
   { id: 'flex', label: 'IB 自动同步' },
+  { id: 'market', label: '市场数据' },
   { id: 'guest', label: '游客权限' },
   { id: 'cleanup', label: '系统清理' },
   { id: 'webhook', label: 'Webhook' },
@@ -91,6 +92,7 @@ export default function SettingsPanel() {
           {activeTab === 'flex' && <FlexTab />}
           {activeTab === 'guest' && <GuestTab isAdmin={isAdmin} />}
           {activeTab === 'cleanup' && <CleanupTab />}
+          {activeTab === 'market' && <MarketTab />}
           {activeTab === 'webhook' && <WebhookTab />}
         </div>
       </aside>
@@ -747,6 +749,221 @@ function WebhookTab() {
   );
 }
 
+
+// ---------- Market Data Tab ----------
+function MarketTab() {
+  const [marketSources, setMarketSources] = useState(['finnhub', 'yahoo']);
+  const [marketFinnhub, setMarketFinnhub] = useState({ enabled: true, api_key: '' });
+  const [marketYahoo, setMarketYahoo] = useState({ enabled: true, api_key: '' });
+  const [marketPolygon, setMarketPolygon] = useState({ enabled: false, api_key: '' });
+  const [marketAlpaca, setMarketAlpaca] = useState({ enabled: false, api_key: '' });
+  const [saving, setSaving] = useState(false);
+  const [marketStatus, setMarketStatus] = useState('idle');
+  const [marketMessage, setMarketMessage] = useState('');
+  const [testStatus, setTestStatus] = useState({});
+
+  useEffect(() => {
+    api.marketSettingsGet().then((data) => {
+      setMarketSources(data.sources || ['finnhub', 'yahoo']);
+      setMarketFinnhub(data.finnhub || { enabled: true, api_key: '' });
+      setMarketYahoo(data.yahoo || { enabled: true, api_key: '' });
+      setMarketPolygon(data.polygon || { enabled: false, api_key: '' });
+      setMarketAlpaca(data.alpaca || { enabled: false, api_key: '' });
+    }).catch(() => {});
+  }, []);
+
+  const toggleSource = (src) => {
+    setMarketSources((prev) => {
+      const exists = prev.includes(src);
+      if (exists) return prev.filter((s) => s !== src);
+      return [...prev, src];
+    });
+  };
+
+  const moveSource = (src, direction) => {
+    setMarketSources((prev) => {
+      const idx = prev.indexOf(src);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      if (direction === 'up' && idx > 0) {
+        [next[idx], next[idx - 1]] = [next[idx - 1], next[idx]];
+      } else if (direction === 'down' && idx < next.length - 1) {
+        [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+      }
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.marketSettingsSave({
+        sources: marketSources,
+        finnhub: marketFinnhub,
+        yahoo: marketYahoo,
+        polygon: marketPolygon,
+        alpaca: marketAlpaca,
+      });
+      alert('市场数据源保存成功');
+    } catch (e) {
+      alert('保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdate = async () => {
+    setMarketStatus('running');
+    setMarketMessage('正在刷新股价...');
+    try {
+      const { jobId } = await api.marketUpdate();
+      const timer = setInterval(async () => {
+        try {
+          const data = await api.marketUpdateStatus(jobId);
+          const job = data.job;
+          if (job.status === 'done') {
+            clearInterval(timer);
+            setMarketStatus('done');
+            setMarketMessage('股价刷新完成，请稍后查看最新净值');
+          } else if (job.status === 'failed') {
+            clearInterval(timer);
+            setMarketStatus('failed');
+            setMarketMessage(job.message || '刷新失败');
+          }
+        } catch (e) {
+          // keep polling
+        }
+      }, 1500);
+    } catch (e) {
+      setMarketStatus('failed');
+      setMarketMessage(e.message || '启动刷新失败');
+    }
+  };
+
+  const handleTestMarket = async (source, apiKey) => {
+    setTestStatus((prev) => ({ ...prev, [source]: { status: 'running', message: '测试中...' } }));
+    try {
+      const data = await api.marketTest(source, apiKey);
+      if (data.success) {
+        setTestStatus((prev) => ({ ...prev, [source]: { status: 'success', message: `✓ 连通成功 AAPL=${data.price}` } }));
+      } else {
+        setTestStatus((prev) => ({ ...prev, [source]: { status: 'error', message: `✗ ${data.error || '测试失败'}` } }));
+      }
+    } catch (e) {
+      setTestStatus((prev) => ({ ...prev, [source]: { status: 'error', message: `✗ ${e.message || '网络错误'}` } }));
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-[var(--gray)]">配置实时股价数据源，用于更新首页净值。系统按下方优先级顺序依次尝试。</p>
+
+      <div className="space-y-3">
+        {/* Finnhub */}
+        <div className="rounded-lg border border-[var(--light-gray)] p-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <input id="src_finnhub" type="checkbox" checked={marketSources.includes('finnhub')} onChange={() => toggleSource('finnhub')} className="h-4 w-4" />
+              <label htmlFor="src_finnhub" className="text-sm font-medium">Finnhub</label>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => moveSource('finnhub', 'up')} disabled={marketSources.indexOf('finnhub') <= 0} className="rounded border border-[var(--light-gray)] px-2 py-0.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-40">▲</button>
+              <button onClick={() => moveSource('finnhub', 'down')} disabled={marketSources.indexOf('finnhub') >= marketSources.length - 1 || marketSources.indexOf('finnhub') === -1} className="rounded border border-[var(--light-gray)] px-2 py-0.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-40">▼</button>
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <input type="text" value={marketFinnhub.api_key || ''} onChange={(e) => setMarketFinnhub((s) => ({ ...s, api_key: e.target.value }))} placeholder="Finnhub API Key（免费 60 calls/min）" className="flex-1 rounded border border-[var(--light-gray)] px-2 py-1.5 text-xs outline-none focus:border-black" />
+            <button onClick={() => handleTestMarket('finnhub', marketFinnhub.api_key || '')} disabled={testStatus['finnhub']?.status === 'running'} className="rounded border border-[var(--light-gray)] px-3 py-1.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-50">{testStatus['finnhub']?.status === 'running' ? '测试中...' : '测试连接'}</button>
+          </div>
+          {testStatus['finnhub']?.status && (
+            <div className={`mt-1.5 text-xs ${testStatus['finnhub'].status === 'success' ? 'text-green-600' : testStatus['finnhub'].status === 'error' ? 'text-red-600' : 'text-blue-600'}`}>{testStatus['finnhub'].message}</div>
+          )}
+        </div>
+
+        {/* Yahoo */}
+        <div className="rounded-lg border border-[var(--light-gray)] p-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <input id="src_yahoo" type="checkbox" checked={marketSources.includes('yahoo')} onChange={() => toggleSource('yahoo')} className="h-4 w-4" />
+              <label htmlFor="src_yahoo" className="text-sm font-medium">Yahoo Finance</label>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => moveSource('yahoo', 'up')} disabled={marketSources.indexOf('yahoo') <= 0} className="rounded border border-[var(--light-gray)] px-2 py-0.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-40">▲</button>
+              <button onClick={() => moveSource('yahoo', 'down')} disabled={marketSources.indexOf('yahoo') >= marketSources.length - 1 || marketSources.indexOf('yahoo') === -1} className="rounded border border-[var(--light-gray)] px-2 py-0.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-40">▼</button>
+            </div>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <p className="text-xs text-[var(--gray)]">完全免费，无需 API Key</p>
+            <button onClick={() => handleTestMarket('yahoo', '')} disabled={testStatus['yahoo']?.status === 'running'} className="rounded border border-[var(--light-gray)] px-3 py-1.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-50">{testStatus['yahoo']?.status === 'running' ? '测试中...' : '测试连接'}</button>
+          </div>
+          {testStatus['yahoo']?.status && (
+            <div className={`mt-1.5 text-xs ${testStatus['yahoo'].status === 'success' ? 'text-green-600' : testStatus['yahoo'].status === 'error' ? 'text-red-600' : 'text-blue-600'}`}>{testStatus['yahoo'].message}</div>
+          )}
+        </div>
+
+        {/* Polygon */}
+        <div className="rounded-lg border border-[var(--light-gray)] p-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <input id="src_polygon" type="checkbox" checked={marketSources.includes('polygon')} onChange={() => toggleSource('polygon')} className="h-4 w-4" />
+              <label htmlFor="src_polygon" className="text-sm font-medium">Polygon</label>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => moveSource('polygon', 'up')} disabled={marketSources.indexOf('polygon') <= 0} className="rounded border border-[var(--light-gray)] px-2 py-0.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-40">▲</button>
+              <button onClick={() => moveSource('polygon', 'down')} disabled={marketSources.indexOf('polygon') >= marketSources.length - 1 || marketSources.indexOf('polygon') === -1} className="rounded border border-[var(--light-gray)] px-2 py-0.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-40">▼</button>
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <input type="text" value={marketPolygon.api_key || ''} onChange={(e) => setMarketPolygon((s) => ({ ...s, api_key: e.target.value }))} placeholder="Polygon API Key" className="flex-1 rounded border border-[var(--light-gray)] px-2 py-1.5 text-xs outline-none focus:border-black" />
+            <button onClick={() => handleTestMarket('polygon', marketPolygon.api_key || '')} disabled={testStatus['polygon']?.status === 'running'} className="rounded border border-[var(--light-gray)] px-3 py-1.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-50">{testStatus['polygon']?.status === 'running' ? '测试中...' : '测试连接'}</button>
+          </div>
+          {testStatus['polygon']?.status && (
+            <div className={`mt-1.5 text-xs ${testStatus['polygon'].status === 'success' ? 'text-green-600' : testStatus['polygon'].status === 'error' ? 'text-red-600' : 'text-blue-600'}`}>{testStatus['polygon'].message}</div>
+          )}
+        </div>
+
+        {/* Alpaca */}
+        <div className="rounded-lg border border-[var(--light-gray)] p-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <input id="src_alpaca" type="checkbox" checked={marketSources.includes('alpaca')} onChange={() => toggleSource('alpaca')} className="h-4 w-4" />
+              <label htmlFor="src_alpaca" className="text-sm font-medium">Alpaca</label>
+            </div>
+            <div className="flex items-center gap-1">
+              <button onClick={() => moveSource('alpaca', 'up')} disabled={marketSources.indexOf('alpaca') <= 0} className="rounded border border-[var(--light-gray)] px-2 py-0.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-40">▲</button>
+              <button onClick={() => moveSource('alpaca', 'down')} disabled={marketSources.indexOf('alpaca') >= marketSources.length - 1 || marketSources.indexOf('alpaca') === -1} className="rounded border border-[var(--light-gray)] px-2 py-0.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-40">▼</button>
+            </div>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <input type="text" value={marketAlpaca.api_key || ''} onChange={(e) => setMarketAlpaca((s) => ({ ...s, api_key: e.target.value }))} placeholder="PKID:SECRET（用冒号分隔）" className="flex-1 rounded border border-[var(--light-gray)] px-2 py-1.5 text-xs outline-none focus:border-black" />
+            <button onClick={() => handleTestMarket('alpaca', marketAlpaca.api_key || '')} disabled={testStatus['alpaca']?.status === 'running'} className="rounded border border-[var(--light-gray)] px-3 py-1.5 text-xs hover:bg-[var(--lighter-gray)] disabled:opacity-50">{testStatus['alpaca']?.status === 'running' ? '测试中...' : '测试连接'}</button>
+          </div>
+          {testStatus['alpaca']?.status && (
+            <div className={`mt-1.5 text-xs ${testStatus['alpaca'].status === 'success' ? 'text-green-600' : testStatus['alpaca'].status === 'error' ? 'text-red-600' : 'text-blue-600'}`}>{testStatus['alpaca'].message}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="text-sm">
+        {marketStatus === 'running' ? (
+          <span className="inline-flex items-center gap-1.5 font-medium text-blue-600">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-600" />
+            {marketMessage || '刷新中...'}
+          </span>
+        ) : marketStatus === 'done' ? (
+          <span className="font-medium text-green-600">✓ {marketMessage}</span>
+        ) : marketStatus === 'failed' ? (
+          <span className="font-medium text-red-600">✗ {marketMessage}</span>
+        ) : null}
+      </div>
+
+      <div className="flex gap-2">
+        <button onClick={handleSave} disabled={saving} className="flex-1 rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? '保存中...' : '保存数据源'}</button>
+        <button onClick={handleUpdate} disabled={marketStatus === 'running'} className="flex-1 rounded-lg border border-[var(--light-gray)] px-3 py-2 text-sm font-medium hover:border-black disabled:opacity-50">{marketStatus === 'running' ? '刷新中...' : '立即刷新股价'}</button>
+      </div>
+    </div>
+  );
+}
 
 // ---------- Upload Tab ----------
 function UploadTab() {

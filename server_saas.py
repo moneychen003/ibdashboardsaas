@@ -717,6 +717,160 @@ def api_dashboard_slice(alias, slice_name):
 
 
 # ------------------------------------------------------------------
+# Market data settings (global default for SaaS)
+# ------------------------------------------------------------------
+MARKET_SETTINGS_FILE = os.path.join(APP_DIR, "config", "market_data_settings.json")
+
+
+def _load_market_settings():
+    if os.path.exists(MARKET_SETTINGS_FILE):
+        with open(MARKET_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {
+        "sources": ["finnhub", "yahoo"],
+        "finnhub": {"enabled": True, "api_key": os.environ.get("FINNHUB_API_KEY", "")},
+        "yahoo": {"enabled": True, "api_key": ""},
+        "polygon": {"enabled": False, "api_key": ""},
+        "alpaca": {"enabled": False, "api_key": ""}
+    }
+
+
+def _save_market_settings(data):
+    os.makedirs(os.path.dirname(MARKET_SETTINGS_FILE), exist_ok=True)
+    with open(MARKET_SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+@app.route("/api/market/settings", methods=["GET"])
+@optional_jwt
+def api_market_settings_get():
+    return jsonify(_load_market_settings())
+
+
+@app.route("/api/market/settings", methods=["POST"])
+@jwt_required()
+@require_admin
+def api_market_settings_post():
+    data = request.get_json(force=True) or {}
+    settings = _load_market_settings()
+    if "sources" in data:
+        settings["sources"] = data["sources"]
+    for src in ["finnhub", "yahoo", "polygon", "alpaca"]:
+        if src in data:
+            settings[src] = {**settings.get(src, {}), **data[src]}
+    _save_market_settings(settings)
+    return jsonify({"success": True, "settings": settings})
+
+
+# ------------------------------------------------------------------
+# Market data update (async, polled from frontend)
+# ------------------------------------------------------------------
+_manual_market_jobs = {}
+
+
+def _run_market_update(job_id: str):
+    _manual_market_jobs[job_id]["status"] = "running"
+    _manual_market_jobs[job_id]["message"] = "正在刷新股价..."
+    try:
+        from scripts.market_data import update_market_prices
+        update_market_prices()
+        _manual_market_jobs[job_id]["status"] = "done"
+        _manual_market_jobs[job_id]["message"] = "股价刷新完成"
+    except Exception as e:
+        _manual_market_jobs[job_id]["status"] = "failed"
+        _manual_market_jobs[job_id]["message"] = str(e)
+
+
+@app.route("/api/market/update", methods=["POST"])
+@jwt_required()
+@require_admin
+def api_market_update():
+    import uuid
+    from datetime import datetime
+    job_id = str(uuid.uuid4())
+    _manual_market_jobs[job_id] = {
+        "status": "queued",
+        "message": "等待开始...",
+        "started_at": datetime.now().isoformat(),
+    }
+    import threading
+    t = threading.Thread(target=_run_market_update, args=(job_id,), daemon=True)
+    t.start()
+    return jsonify({"success": True, "jobId": job_id})
+
+
+@app.route("/api/market/update/status/<job_id>")
+@jwt_required()
+@require_admin
+def api_market_update_status(job_id):
+    job = _manual_market_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify({"success": True, "job": job})
+
+@app.route("/api/market/test/<source>", methods=["POST"])
+@jwt_required()
+@require_admin
+def api_market_test(source):
+    data = request.get_json(force=True) or {}
+    api_key = data.get("api_key", "")
+    try:
+        if source == "finnhub":
+            import requests
+            resp = requests.get(
+                "https://finnhub.io/api/v1/quote",
+                params={"symbol": "AAPL", "token": api_key},
+                timeout=10,
+            )
+            r = resp.json()
+            price = r.get("c")
+            if price is not None and float(price) > 0:
+                return jsonify({"success": True, "price": float(price), "sample": "AAPL"})
+            return jsonify({"success": False, "error": r.get("error") or "无法获取有效价格，请检查 API Key"}), 400
+        elif source == "yahoo":
+            import yfinance as yf
+            df = yf.download("AAPL", period="5d", interval="1d", progress=False)
+            price = float(df["Close"].dropna().iloc[-1]) if not df.empty else None
+            if price and price > 0:
+                return jsonify({"success": True, "price": price, "sample": "AAPL"})
+            return jsonify({"success": False, "error": "Yahoo 获取不到数据"}), 400
+        elif source == "polygon":
+            import requests
+            resp = requests.get(
+                "https://api.polygon.io/v2/aggs/ticker/AAPL/prev",
+                params={"apiKey": api_key},
+                timeout=10,
+            )
+            r = resp.json()
+            results = r.get("results", [])
+            if results:
+                price = results[0].get("c")
+                if price is not None and float(price) > 0:
+                    return jsonify({"success": True, "price": float(price), "sample": "AAPL"})
+            return jsonify({"success": False, "error": r.get("error") or "无法获取有效价格，请检查 API Key"}), 400
+        elif source == "alpaca":
+            import requests
+            if ":" not in api_key:
+                return jsonify({"success": False, "error": "格式应为 PKID:SECRET"}), 400
+            key_id, secret = api_key.split(":", 1)
+            resp = requests.get(
+                "https://data.alpaca.markets/v2/stocks/AAPL/trades/latest",
+                headers={"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret},
+                timeout=10,
+            )
+            r = resp.json()
+            trade = r.get("trade", {})
+            price = trade.get("p")
+            if price is not None and float(price) > 0:
+                return jsonify({"success": True, "price": float(price), "sample": "AAPL"})
+            return jsonify({"success": False, "error": r.get("message") or "无法获取有效价格，请检查 API Key"}), 400
+        else:
+            return jsonify({"success": False, "error": "未知数据源"}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ------------------------------------------------------------------
 # Admin Routes
 # ------------------------------------------------------------------
 

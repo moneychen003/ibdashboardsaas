@@ -116,4 +116,11 @@ export const api = {
 
   // Alert runner
   adminRunAlerts: () => fetchJson('/api/admin/run-alerts', { method: 'POST' }),
+
+  // Market data settings
+  marketSettingsGet: () => fetchJson('/api/market/settings'),
+  marketSettingsSave: (data) => fetchJson('/api/market/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  marketUpdate: () => fetchJson('/api/market/update', { method: 'POST' }),
+  marketUpdateStatus: (jobId) => fetchJson(`/api/market/update/status/${jobId}`),
+  marketTest: (source, apiKey) => fetchJson(`/api/market/test/${source}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: apiKey }) }),
 };

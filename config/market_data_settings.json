@@ -1,0 +1,19 @@
+{
+  "sources": ["finnhub", "yahoo"],
+  "finnhub": {
+    "enabled": true,
+    "api_key": "c2paoqhr01qnhraqbfn0d2paoqhr01qnhraqbfng"
+  },
+  "yahoo": {
+    "enabled": true,
+    "api_key": ""
+  },
+  "polygon": {
+    "enabled": false,
+    "api_key": ""
+  },
+  "alpaca": {
+    "enabled": false,
+    "api_key": ""
+  }
+}
