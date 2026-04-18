@@ -56,6 +56,11 @@ def _build_events(cursor, user_id: str, account_id: str, symbol: str, since_date
         qty_str = row['quantity']
         mtm_str = row['mtm_pnl']
         date = row['date']
+        # Normalize to YYYYMMDD string to match archive_trade.trade_date format
+        if hasattr(date, 'strftime'):
+            date = date.strftime('%Y%m%d')
+        else:
+            date = str(date).replace('-', '')
         pc = row['put_call']
         strike_str = row['strike']
         contracts = abs(safe_float(qty_str)) if qty_str else 0

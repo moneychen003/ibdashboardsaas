@@ -309,3 +309,19 @@ cd /home/moneychen/ib_dashboard
 source .venv/bin/activate
 python3 -c "from scripts.market_data import scheduled_update_all; scheduled_update_all()"
 ```
+
+---
+
+## 更新记录
+
+### 2025-04-19
+
+**修复：成本基础重复计算导致持仓盈亏显示错误**
+
+- **问题**：`option_eae`（期权行权）与 `archive_trade`（股票交易）的日期格式不一致（前者为 `YYYY-MM-DD` / `datetime.date`，后者为 `YYYYMMDD` 字符串）。这导致期权 Assignment（行权买入股票）无法与 `archive_trade` 中对应的股票买入记录匹配，被重复计算为独立的 BUY 事件。表现为：持仓"盈亏%"为正，但"未实现盈亏"为负。
+- **影响范围**：所有通过 Put 行权获得股票的持仓（如 QQQ、XPEV 等）。
+- **修复文件**：
+  - `scripts/incremental_cost_basis.py`：统一 `option_eae.date` 为 `YYYYMMDD` 字符串后再匹配。
+  - `scripts/sqlite_to_dashboard.py`：同上。
+  - `web/src/components/tabs/PositionsTab.jsx`：前端增加兜底逻辑，`未实现盈亏 = 市值 - 成本价 × 当前数量`，确保即使后端数据异常，盈亏金额与盈亏百分比也不会矛盾。
+

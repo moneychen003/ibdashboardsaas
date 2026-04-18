@@ -561,6 +561,9 @@ def _calc_cost_basis_for_account(conn, account_id):
         shares = contracts * 100
         mtm = safe_float(mtm_str) if mtm_str else 0
         strike = safe_float(strike_str) if strike_str else 0
+        # Normalize date to YYYYMMDD to match archive_trade.trade_date format
+        if date and len(str(date)) == 10 and str(date)[4] == '-':
+            date = str(date).replace('-', '')
         key = (underlying, date)
         assignments_by_date_sym.setdefault(key, []).append({
             'symbol': opt_sym, 'shares': shares, 'premium': mtm, 'put_call': pc,

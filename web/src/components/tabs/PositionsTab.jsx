@@ -236,7 +236,9 @@ function OptionExpiry({ options }) {
 function PositionPnl({ positions, costMode }) {
   const rows = positions
     .map((p) => {
-      const costMoney = costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0);
+      const costPrice = costMode === 'diluted' ? (p.dilutedCostBasisPrice || 0) : (p.avgCostBasisPrice || 0);
+      const qty = p.markPrice ? p.positionValue / p.markPrice : 0;
+      const costMoney = costPrice && qty ? costPrice * qty : (costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0));
       const unrealized = (p.positionValue || 0) - costMoney;
       return {
         symbol: p.symbol,
@@ -299,7 +301,9 @@ export default function PositionsTab() {
   const totalCash = summary.cash || 0;
 
   const totalUnrealized = filteredPositions.reduce((s, p) => {
-    const costMoney = costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0);
+    const costPrice = costMode === 'diluted' ? (p.dilutedCostBasisPrice || 0) : (p.avgCostBasisPrice || 0);
+    const qty = p.markPrice ? p.positionValue / p.markPrice : 0;
+    const costMoney = costPrice && qty ? costPrice * qty : (costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0));
     return s + ((p.positionValue || 0) - costMoney);
   }, 0);
 
@@ -307,7 +311,7 @@ export default function PositionsTab() {
     const enriched = filteredPositions.map((p) => {
       const qty = p.markPrice ? p.positionValue / p.markPrice : 0;
       const costPrice = costMode === 'diluted' ? (p.dilutedCostBasisPrice || 0) : (p.avgCostBasisPrice || 0);
-      const costMoney = costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0);
+      const costMoney = costPrice && qty ? costPrice * qty : (costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0));
       const unrealized = (p.positionValue || 0) - costMoney;
       const gainPct = costPrice ? ((p.markPrice - costPrice) / costPrice) * 100 : 0;
       return { ...p, qty, costPrice, costMoney, unrealized, gainPct };
