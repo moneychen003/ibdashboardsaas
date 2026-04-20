@@ -248,6 +248,21 @@ END;
 
 共修复 **37 张** `archive_*` 表的所有者。随后将失败的上传记录重置为 `pending` 并重新入队 RQ，导入成功（18,466 行）。
 
+### 7. 管理员后台点击用户 Dashboard 仍显示管理员自己的数据
+
+**现象**: 管理员在「数据浏览」中点击某个用户的 **Dashboard** 按钮，跳转后看到的仍是管理员自己的账户和数据。
+
+**原因**（三层）：
+1. **前端路由丢失参数**: `App.jsx` 的 URL-sync effect 调用 `navigate('/U999/overview', { replace: true })` 时只传了 pathname，**query string** (`?admin_preview_user=xxx`) 被丢弃。
+2. **账户列表接口未走 preview**: `dashboardStore.loadAccounts()` 调用 `api.accounts()` 时没有携带 `preview_user_id`，导致返回的是管理员自己的账户列表。
+3. **后端 `/api/accounts` 未支持 preview**: 该接口直接使用 `get_current_user_id()`，没有调用 `_resolve_preview_user_id()` 来识别管理员 impersonation。
+
+**修复**:
+- `web/src/App.jsx`: `navigate(expectedPath + location.search, { replace: true })` 保留 query params。
+- `web/src/api.js`: `accounts()` 增加 `params` 参数支持。
+- `web/src/stores/dashboardStore.js`: `loadAccounts()` 调用时传入 `get()._adminParams()`。
+- `server_saas.py`: `/api/accounts` 使用 `_resolve_preview_user_id()` 获取目标用户 ID。
+
 ---
 
 ## 目录结构

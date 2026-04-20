@@ -254,12 +254,13 @@ def api_accounts():
     user_id = get_current_user_id()
     if user_id == GUEST_USER_ID:
         return jsonify({"accounts": []})
+    target_user = _resolve_preview_user_id(user_id)
     rows = execute('''
         SELECT account_id, label, color, is_default
         FROM user_accounts
         WHERE user_id = %s
         ORDER BY created_at
-    ''', (user_id,))
+    ''', (target_user,))
     result = []
     for r in rows:
         result.append({

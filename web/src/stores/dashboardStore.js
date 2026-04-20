@@ -159,7 +159,7 @@ export const useDashboardStore = create((set, get) => ({
   },
 
   loadAccounts: async () => {
-    const { accounts } = await api.accounts();
+    const { accounts } = await api.accounts(get()._adminParams());
     set({ accounts });
     const current = get().currentAccount;
     // Only default to combined if no account is currently selected

@@ -57,7 +57,7 @@ function DashboardRoute() {
     const targetTab = tab || 'overview';
     const expectedPath = `/${targetAccount}/${targetTab}`;
     if (location.pathname !== expectedPath) {
-      navigate(expectedPath, { replace: true });
+      navigate(expectedPath + location.search, { replace: true });
     }
   }, [account, tab, currentAccount, accounts.length, location.pathname, navigate]);
 

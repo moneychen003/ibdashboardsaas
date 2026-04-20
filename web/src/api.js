@@ -53,7 +53,7 @@ export const api = {
   me: () => fetchJson('/api/auth/me'),
 
   // Dashboard
-  accounts: () => fetchJson('/api/accounts'),
+  accounts: (params = '') => fetchJson(`/api/accounts${params}`),
   dashboard: (alias, params = '') => fetchJson(`/api/dashboard/${alias}${params}`),
   dashboardOverview: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/overview${params}`),
   dashboardPositions: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/positions${params}`),
