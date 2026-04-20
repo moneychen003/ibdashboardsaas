@@ -221,6 +221,33 @@ UPDATE user_profiles SET max_history_months = 99999 WHERE user_id = 'YOUR_USER_I
 - 后端：`_slice_payload` 对 `isDemo: true` 的 payload 直接返回完整 JSON，不再切片。
 - Demo 数据：给 `demo_dashboard.json` 补全了原本为空的示例字段（benchmarks、leverageMetrics、mtmPerformanceSummary、tradingHeatmap、tradeRankings、washSaleAlerts、orderExecution.fills、positionChanges.changes、changeInNavDetails、taxSummary、cashflowWaterfall、corporateActionImpact.events、feeErosion.byMonth 等）。
 
+### 6. 新用户上传 XML 导入失败：`must be owner of table archive_cash_transaction`
+
+**现象**: 新注册用户（如 `moneychen.com`）上传 IB 报表后，后台显示 **failed**，前端看板仍停留在 Demo 数据。
+
+**原因**: 生产环境 PostgreSQL 中，大量 `archive_*` 表的所有者是 `postgres`（初始化时以超级用户创建），但应用运行时连接的是 `ibuser`。XML 导入器 `scripts/xml_to_postgres.py` 在解析新标签时会调用 `ensure_archive_table()` 动态 `ALTER TABLE ADD COLUMN`，非表所有者执行该操作会被 PostgreSQL 拒绝。
+
+**修复**（服务器执行）:
+
+```bash
+sudo -u postgres psql -d ib_dashboard -c "
+DO \$\$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables
+           WHERE schemaname = 'public'
+             AND tablename LIKE 'archive_%'
+             AND tableowner != 'ibuser'
+  LOOP
+    EXECUTE 'ALTER TABLE ' || quote_ident(r.tablename) || ' OWNER TO ibuser';
+  END LOOP;
+END;
+\$\$;
+"
+```
+
+共修复 **37 张** `archive_*` 表的所有者。随后将失败的上传记录重置为 `pending` 并重新入队 RQ，导入成功（18,466 行）。
+
 ---
 
 ## 目录结构
