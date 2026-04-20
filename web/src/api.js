@@ -88,6 +88,10 @@ export const api = {
   adminDashboard: (userId, accountId = 'combined') => fetchJson(`/api/admin/dashboard?user_id=${encodeURIComponent(userId)}&account_id=${encodeURIComponent(accountId)}`),
   adminDataQuality: () => fetchJson('/api/admin/data-quality'),
   adminSystem: () => fetchJson('/api/admin/system'),
+  // User uploads
+  userUploads: () => fetchJson("/api/uploads"),
+  userUploadDelete: (id) => fetchJson(`/api/uploads/${id}`, { method: "DELETE" }),
+  userUploadReset: () => fetchJson("/api/uploads/reset", { method: "POST" }),
   adminAuditLogs: (params = '') => fetchJson(`/api/admin/audit-logs${params}`),
   adminConfig: () => fetchJson('/api/admin/config'),
   adminSaveConfig: (data) => fetchJson('/api/admin/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),

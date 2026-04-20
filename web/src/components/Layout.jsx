@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useDashboardStore } from '../stores/dashboardStore';
 import SettingsPanel from './SettingsPanel';
 import { api } from '../api';
+import { FEATURES } from '../config/features';
+import { CommunityButton, CommunityModal } from './promotion';
 
 function classNames(...c) {
   return c.filter(Boolean).join(' ');
@@ -19,11 +21,14 @@ export default function Layout({ children }) {
   const toggleSettings = useDashboardStore((s) => s.toggleSettings);
   const data = useDashboardStore((s) => s.data);
   const registerUploadFns = useDashboardStore((s) => s.registerUploadFns);
+  const bumpUploadHistory = useDashboardStore((s) => s.bumpUploadHistory);
 
   const [updateTime, setUpdateTime] = useState('');
   const [uploadQueue, setUploadQueue] = useState([]);
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
+
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     registerUploadFns(
@@ -89,6 +94,7 @@ export default function Layout({ children }) {
             setUploadQueue((prev) =>
               prev.map((q) => (q.id === id ? { ...q, status: 'done', message: '完成' } : q))
             );
+            bumpUploadHistory();
           } else if (job.status === 'failed') {
             clearInterval(poll);
             setUploadQueue((prev) =>
@@ -165,7 +171,7 @@ export default function Layout({ children }) {
   return (
     <div className="min-h-screen bg-white">
       <nav className="sticky top-0 z-50 border-b border-[var(--light-gray)] bg-white/95 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-6">
+        <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-3 md:px-6">
           <div className="flex items-center gap-4">
             <a href="/" className="flex items-center gap-2 font-semibold text-lg">
               <img src="/logo.jpg" alt="logo" className="h-8 w-8 rounded-lg object-cover" />
@@ -174,7 +180,8 @@ export default function Layout({ children }) {
             {accounts.length > 0 && (
               <div className="relative group">
                 <button className="flex items-center gap-1 rounded-lg border border-[var(--light-gray)] px-3 py-1.5 pb-2 text-sm font-medium hover:border-black">
-                  <span>{current?.label || '加载中'}</span>
+                  <span className="hidden sm:inline">{current?.label || '加载中'}</span>
+                  <span className="sm:hidden">{current?.label?.replace('合并总资产', '总资产') || '加载中'}</span>
                   <span>▾</span>
                 </button>
                 <div className="absolute top-full left-0 hidden min-w-[160px] rounded-lg border border-[var(--light-gray)] bg-white shadow-lg group-hover:block hover:block overflow-hidden">
@@ -196,13 +203,13 @@ export default function Layout({ children }) {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-1 md:gap-2 md:overflow-visible md:py-0">
             {tabs.map((t) => (
               <button
                 key={t.id}
                 onClick={() => navigateToTab(t.id)}
                 className={classNames(
-                  'rounded-md px-3 py-2 text-sm font-medium transition',
+                  'whitespace-nowrap rounded-md px-2 py-1.5 text-sm font-medium transition md:px-3 md:py-2',
                   activeTab === t.id ? 'bg-[var(--lighter-gray)] text-black' : 'text-[var(--gray)] hover:bg-[var(--lighter-gray)] hover:text-black'
                 )}
               >
@@ -212,7 +219,7 @@ export default function Layout({ children }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-[var(--gray)]">{updateTime}</span>
+            <span className="hidden text-xs text-[var(--gray)] md:inline">{updateTime}</span>
 
             <input
               type="file"
@@ -233,15 +240,16 @@ export default function Layout({ children }) {
             {isAdmin && (
               <button
                 onClick={() => navigate('/admin')}
-                className="rounded-lg border border-[var(--light-gray)] px-3 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white"
+                className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
               >
-                管理后台
+                <span className="hidden md:inline">管理后台</span>
+                <span className="md:hidden">⚙️</span>
               </button>
             )}
 
             {auth?.email ? (
               <>
-                <span className="rounded-lg border border-[var(--light-gray)] bg-[var(--lighter-gray)] px-3 py-1.5 text-sm font-medium max-w-[120px] truncate">
+                <span className="rounded-lg border border-[var(--light-gray)] bg-[var(--lighter-gray)] px-2 py-1.5 text-sm font-medium max-w-[120px] truncate md:px-3">
                   {auth.email}
                 </span>
                 <button
@@ -249,31 +257,37 @@ export default function Layout({ children }) {
                     localStorage.removeItem('token');
                     window.location.href = '/login';
                   }}
-                  className="rounded-lg border border-[var(--light-gray)] px-3 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white"
+                  className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
                 >
-                  退出
+                  <span className="hidden md:inline">退出</span>
+                  <span className="md:hidden">↪</span>
                 </button>
               </>
             ) : (
               <a
                 href="/login"
-                className="rounded-lg border border-[var(--light-gray)] px-3 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white"
+                className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
               >
                 登录
               </a>
             )}
+
+            {FEATURES.enablePromotion && (
+              <CommunityButton onClick={() => setModalOpen(true)} />
+            )}
+
             <button
               onClick={() => navigate('/help')}
-              className="rounded-lg border border-[var(--light-gray)] px-3 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white"
+              className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
             >
-              ❓ 帮助
+              ❓<span className="hidden md:inline"> 帮助</span>
             </button>
             {auth?.email && (
               <button
                 onClick={toggleSettings}
-                className="rounded-lg border border-[var(--light-gray)] px-3 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white"
+                className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
               >
-                ⚙️ 设置
+                ⚙️<span className="hidden md:inline"> 设置</span>
               </button>
             )}
           </div>
@@ -281,7 +295,7 @@ export default function Layout({ children }) {
       </nav>
 
       {uploadQueue.length > 0 && (
-        <div className="mx-auto max-w-[1400px] px-6 pt-6">
+        <div className="mx-auto max-w-[1400px] px-3 pt-4 md:px-6 md:pt-6">
           <div className="rounded-xl border border-[var(--light-gray)] bg-white p-4">
             <div className="mb-3 flex items-center justify-between">
               <div className="text-sm font-semibold">上传队列 ({uploadQueue.filter((q) => q.status === 'done').length}/{uploadQueue.length} 完成)</div>
@@ -322,7 +336,7 @@ export default function Layout({ children }) {
       )}
 
       {data?.isDemo && (
-        <div className="mx-auto max-w-[1400px] px-6 pt-4">
+        <div className="mx-auto max-w-[1400px] px-3 pt-3 md:px-6 md:pt-4">
           <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-amber-900">
             <div className="text-sm">
               <span className="font-semibold">🎉 欢迎体验 IB Dashboard</span>
@@ -346,7 +360,11 @@ export default function Layout({ children }) {
         </div>
       )}
 
-      <main className="mx-auto max-w-[1400px] px-6 py-10">{children}</main>
+      {FEATURES.enablePromotion && (
+        <CommunityModal visible={modalOpen} onClose={() => setModalOpen(false)} />
+      )}
+
+      <main className="mx-auto max-w-[1400px] px-3 py-6 md:px-6 md:py-10">{children}</main>
       <SettingsPanel />
     </div>
   );

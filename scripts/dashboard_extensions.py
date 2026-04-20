@@ -811,11 +811,20 @@ def get_risk_radar(conn, account_id=None):
     params_core_risk = _acc_params(account_id)
 
     # Latest NAV
-    cursor.execute(f'''
-        SELECT ending_value FROM daily_nav WHERE {where_core_risk} ORDER BY date DESC LIMIT 1
-    ''', params_core_risk)
-    row = cursor.fetchone()
-    nav = safe_float(row[0]) if row else 0.0
+    if account_id:
+        cursor.execute(f'''
+            SELECT ending_value FROM daily_nav WHERE {where_core_risk} ORDER BY date DESC LIMIT 1
+        ''', params_core_risk)
+        row = cursor.fetchone()
+        nav = safe_float(row[0]) if row else 0.0
+    else:
+        # Combined 账户：取最新日期的所有账户 NAV 总和
+        cursor.execute('''
+            SELECT SUM(ending_value) FROM daily_nav 
+            WHERE date = (SELECT MAX(date) FROM daily_nav)
+        ''')
+        row = cursor.fetchone()
+        nav = safe_float(row[0]) if row else 0.0
 
     # Concentration
     cursor.execute(f'''
@@ -840,10 +849,18 @@ def get_risk_radar(conn, account_id=None):
     option_exposure = safe_float(row[0]) if row else 0.0
 
     # Volatility from daily_nav
-    cursor.execute(f'''
-        SELECT ending_value FROM daily_nav WHERE {where_core_risk} ORDER BY date
-    ''', params_core_risk)
-    navs = [safe_float(r[0]) for r in cursor.fetchall() if r[0] is not None]
+    if account_id:
+        cursor.execute(f'''
+            SELECT ending_value FROM daily_nav WHERE {where_core_risk} ORDER BY date
+        ''', params_core_risk)
+        navs = [safe_float(r[0]) for r in cursor.fetchall() if r[0] is not None]
+    else:
+        # Combined 账户：按日期汇总所有账户的 NAV
+        cursor.execute('''
+            SELECT date, SUM(ending_value) FROM daily_nav 
+            GROUP BY date ORDER BY date
+        ''')
+        navs = [safe_float(r[1]) for r in cursor.fetchall() if r[1] is not None]
     returns = []
     for i in range(1, len(navs)):
         if navs[i - 1] and navs[i - 1] != 0:

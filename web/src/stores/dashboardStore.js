@@ -40,6 +40,8 @@ export const useDashboardStore = create((set, get) => ({
   registerUploadFns: (xmlFn, folderFn) => set({ uploadXmlFn: xmlFn, uploadFolderFn: folderFn }),
   triggerUploadXml: () => { const fn = get().uploadXmlFn; if (fn) fn(); },
   triggerUploadFolder: () => { const fn = get().uploadFolderFn; if (fn) fn(); },
+  uploadHistoryVersion: 0,
+  bumpUploadHistory: () => set((s) => ({ uploadHistoryVersion: s.uploadHistoryVersion + 1 })),
 
   // Public config (guest tab visibility)
   publicConfig: null,

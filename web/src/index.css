@@ -29,3 +29,10 @@ body {
 .module-hidden {
   display: none !important;
 }
+
+/* ===== Mobile Global Optimizations ===== */
+@media (max-width: 767px) {
+  .chart-container {
+    height: 220px;
+  }
+}

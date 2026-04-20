@@ -1,11 +1,19 @@
 {
-  "sources": ["finnhub", "yahoo"],
+  "sources": ["finnhub", "yahoo", "webull", "tradier"],
   "finnhub": {
     "enabled": true,
-    "api_key": "c2paoqhr01qnhraqbfn0d2paoqhr01qnhraqbfng"
+    "api_key": "d2paoqhr01qnhraqbfn0d2paoqhr01qnhraqbfng"
   },
   "yahoo": {
     "enabled": true,
+    "api_key": ""
+  },
+  "webull": {
+    "enabled": true,
+    "api_key": ""
+  },
+  "tradier": {
+    "enabled": false,
     "api_key": ""
   },
   "polygon": {
@@ -15,5 +23,6 @@
   "alpaca": {
     "enabled": false,
     "api_key": ""
-  }
+  },
+  "update_interval_minutes": 30
 }

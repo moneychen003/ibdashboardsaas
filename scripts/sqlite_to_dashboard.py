@@ -827,9 +827,6 @@ def get_latest_positions(conn, account_id=None):
                 cbm_local = safe_float(row[9]) if row[9] is not None else 0
                 cbp_local = safe_float(row[10]) if row[10] is not None else 0
                 fpu_local = safe_float(row[11]) if row[11] is not None else 0
-                cbm = cbm_local * fx
-                cbp = cbp_local * fx
-                fpu = fpu_local * fx
 
                 existing = agg.get(symbol)
                 if existing is None:
@@ -837,18 +834,20 @@ def get_latest_positions(conn, account_id=None):
                         'symbol': symbol,
                         'description': row[1],
                         'assetType': row[2],
-                        'positionValue': pv,
-                        'markPrice': mp,
+                        'positionValue': pv_local,
+                        'markPrice': mp_local,
+                        'positionValueInBase': pv,
                         '_qty': qty,
                         'currency': currency,
-                        'costBasisMoney': cbm,
-                        'costBasisPrice': cbp,
-                        'fifoPnlUnrealized': fpu,
+                        'costBasisMoney': cbm_local,
+                        'costBasisPrice': cbp_local,
+                        'fifoPnlUnrealized': fpu_local,
                     }
                 else:
-                    existing['positionValue'] += pv
-                    existing['costBasisMoney'] += cbm
-                    existing['fifoPnlUnrealized'] += fpu
+                    existing['positionValue'] += pv_local
+                    existing['positionValueInBase'] = existing.get('positionValueInBase', 0) + pv
+                    existing['costBasisMoney'] += cbm_local
+                    existing['fifoPnlUnrealized'] += fpu_local
                     existing['_qty'] += qty
         processed_rows = []
         for v in agg.values():
@@ -860,7 +859,7 @@ def get_latest_positions(conn, account_id=None):
             processed_rows.append((
                 v['symbol'], v['description'], v['assetType'], v['positionValue'],
                 v['markPrice'], v['currency'], None, v['costBasisMoney'],
-                v['costBasisPrice'], v['fifoPnlUnrealized']
+                v['costBasisPrice'], v['fifoPnlUnrealized'], v['quantity'], v.get('positionValueInBase')
             ))
 
     # Best-effort 期权盈亏估算（基于 archive_trade proceeds 累计净现金流 + 当前市值）
@@ -912,17 +911,20 @@ def get_latest_positions(conn, account_id=None):
     for row in processed_rows:
         symbol = row[0]
         cb = cost_map.get(symbol, {})
+        qty = row[10] if len(row) > 10 else (safe_float(row[3]) / safe_float(row[4]) if safe_float(row[4]) else 0)
         item = {
             'symbol': symbol,
             'description': row[1],
             'assetType': row[2],
             'positionValue': row[3],
             'markPrice': row[4],
+            'quantity': round(qty, 2) if qty else 0,
             'currency': row[5] or 'USD',
             'fxRateToBase': safe_float(row[6]) if row[6] else None,
             'costBasisMoney': safe_float(row[7]) if row[7] is not None else None,
             'costBasisPrice': safe_float(row[8]) if row[8] is not None else None,
             'fifoPnlUnrealized': safe_float(row[9]) if row[9] is not None else None,
+            'positionValueInBase': safe_float(row[11]) if len(row) > 11 and row[11] is not None else None,
             'avgCostBasisPrice': cb.get('avgCostBasisPrice'),
             'avgCostBasisMoney': cb.get('avgCostBasisMoney'),
             'dilutedCostBasisPrice': cb.get('dilutedCostBasisPrice'),
@@ -2986,6 +2988,17 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
         'fundValue': 0, 'bondValue': 0, 'commodityValue': 0, 'dividendAccruals': 0,
         'interestAccruals': 0, 'cashByCurrency': [], 'positionTotal': 0
     })
+
+    # Fix leverage_metrics to be consistent with balance_breakdown
+    # (get_leverage_metrics may return 0 for combined accounts due to SQL quirks)
+    leverage_metrics['netLiquidation'] = round(balance_breakdown.get('netLiquidation', leverage_metrics.get('netLiquidation', 0)), 2)
+    leverage_metrics['stockMarketValue'] = round(balance_breakdown.get('stockValue', leverage_metrics.get('stockMarketValue', 0)), 2)
+    leverage_metrics['etfMarketValue'] = round(balance_breakdown.get('etfValue', leverage_metrics.get('etfMarketValue', 0)), 2)
+    leverage_metrics['optionMarketValue'] = round(balance_breakdown.get('optionValue', leverage_metrics.get('optionMarketValue', 0)), 2)
+    gross_exp = abs(leverage_metrics.get('stockMarketValue', 0)) + abs(leverage_metrics.get('etfMarketValue', 0)) + abs(leverage_metrics.get('optionMarketValue', 0))
+    leverage_metrics['grossExposure'] = round(gross_exp, 2)
+    net_liq_val = leverage_metrics.get('netLiquidation', 0)
+    leverage_metrics['leverageRatio'] = round(gross_exp / net_liq_val, 2) if net_liq_val else 0
 
     # New extension data
     position_timeline = _compute('position_timeline', lambda: get_position_timeline(conn, account_id), {'symbols': [], 'holdings': {}, 'turnoverRank': [], 'holdingPeriodRank': []})

@@ -741,24 +741,70 @@ def _save_market_settings(data):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def _load_user_market_settings(user_id):
+    """Load per-user market settings, fallback to global default."""
+    row = execute_one('''
+        SELECT sources, finnhub, yahoo, webull, tradier, polygon, alpaca
+        FROM user_market_settings WHERE user_id = %s
+    ''', (user_id,))
+    if row:
+        return {
+            "sources": row.get("sources", ["finnhub", "yahoo", "webull", "tradier"]),
+            "finnhub": row.get("finnhub", {"enabled": True, "api_key": ""}),
+            "yahoo": row.get("yahoo", {"enabled": True, "api_key": ""}),
+            "webull": row.get("webull", {"enabled": True, "api_key": ""}),
+            "tradier": row.get("tradier", {"enabled": False, "api_key": ""}),
+            "polygon": row.get("polygon", {"enabled": False, "api_key": ""}),
+            "alpaca": row.get("alpaca", {"enabled": False, "api_key": ""}),
+        }
+    return _load_market_settings()
+
+
+def _save_user_market_settings(user_id, data):
+    """Upsert per-user market settings."""
+    import psycopg2
+    sources = json.dumps(data.get("sources", ["finnhub", "yahoo", "webull", "tradier"]))
+    finnhub = json.dumps(data.get("finnhub", {"enabled": True, "api_key": ""}))
+    yahoo = json.dumps(data.get("yahoo", {"enabled": True, "api_key": ""}))
+    webull = json.dumps(data.get("webull", {"enabled": True, "api_key": ""}))
+    tradier = json.dumps(data.get("tradier", {"enabled": False, "api_key": ""}))
+    polygon = json.dumps(data.get("polygon", {"enabled": False, "api_key": ""}))
+    alpaca = json.dumps(data.get("alpaca", {"enabled": False, "api_key": ""}))
+    execute_one('''
+        INSERT INTO user_market_settings
+            (user_id, sources, finnhub, yahoo, webull, tradier, polygon, alpaca, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (user_id) DO UPDATE SET
+            sources = EXCLUDED.sources,
+            finnhub = EXCLUDED.finnhub,
+            yahoo = EXCLUDED.yahoo,
+            webull = EXCLUDED.webull,
+            tradier = EXCLUDED.tradier,
+            polygon = EXCLUDED.polygon,
+            alpaca = EXCLUDED.alpaca,
+            updated_at = NOW()
+    ''', (user_id, sources, finnhub, yahoo, webull, tradier, polygon, alpaca))
+
+
 @app.route("/api/market/settings", methods=["GET"])
-@optional_jwt
+@jwt_required()
 def api_market_settings_get():
-    return jsonify(_load_market_settings())
+    user_id = get_jwt_identity()
+    return jsonify(_load_user_market_settings(user_id))
 
 
 @app.route("/api/market/settings", methods=["POST"])
 @jwt_required()
-@require_admin
 def api_market_settings_post():
+    user_id = get_jwt_identity()
     data = request.get_json(force=True) or {}
-    settings = _load_market_settings()
+    settings = _load_user_market_settings(user_id)
     if "sources" in data:
         settings["sources"] = data["sources"]
-    for src in ["finnhub", "yahoo", "polygon", "alpaca"]:
+    for src in ["finnhub", "yahoo", "webull", "tradier", "polygon", "alpaca"]:
         if src in data:
             settings[src] = {**settings.get(src, {}), **data[src]}
-    _save_market_settings(settings)
+    _save_user_market_settings(user_id, settings)
     return jsonify({"success": True, "settings": settings})
 
 
@@ -768,12 +814,12 @@ def api_market_settings_post():
 _manual_market_jobs = {}
 
 
-def _run_market_update(job_id: str):
+def _run_market_update(job_id: str, user_id: str):
     _manual_market_jobs[job_id]["status"] = "running"
     _manual_market_jobs[job_id]["message"] = "正在刷新股价..."
     try:
         from scripts.market_data import update_market_prices
-        update_market_prices()
+        update_market_prices(user_id)
         _manual_market_jobs[job_id]["status"] = "done"
         _manual_market_jobs[job_id]["message"] = "股价刷新完成"
     except Exception as e:
@@ -783,37 +829,45 @@ def _run_market_update(job_id: str):
 
 @app.route("/api/market/update", methods=["POST"])
 @jwt_required()
-@require_admin
 def api_market_update():
     import uuid
     from datetime import datetime
+    user_id = get_jwt_identity()
     job_id = str(uuid.uuid4())
     _manual_market_jobs[job_id] = {
         "status": "queued",
         "message": "等待开始...",
         "started_at": datetime.now().isoformat(),
+        "user_id": user_id,
     }
     import threading
-    t = threading.Thread(target=_run_market_update, args=(job_id,), daemon=True)
+    t = threading.Thread(target=_run_market_update, args=(job_id, user_id), daemon=True)
     t.start()
     return jsonify({"success": True, "jobId": job_id})
 
 
 @app.route("/api/market/update/status/<job_id>")
 @jwt_required()
-@require_admin
 def api_market_update_status(job_id):
+    user_id = get_jwt_identity()
     job = _manual_market_jobs.get(job_id)
     if not job:
+        return jsonify({"error": "Job not found"}), 404
+    # Users can only check their own jobs
+    if job.get("user_id") and job.get("user_id") != user_id:
         return jsonify({"error": "Job not found"}), 404
     return jsonify({"success": True, "job": job})
 
 @app.route("/api/market/test/<source>", methods=["POST"])
 @jwt_required()
-@require_admin
 def api_market_test(source):
+    user_id = get_jwt_identity()
     data = request.get_json(force=True) or {}
+    # Use API key from request (user testing unsaved key) or fallback to saved settings
     api_key = data.get("api_key", "")
+    if not api_key:
+        settings = _load_user_market_settings(user_id)
+        api_key = settings.get(source, {}).get("api_key", "")
     try:
         if source == "finnhub":
             import requests
@@ -865,7 +919,7 @@ def api_market_test(source):
                 return jsonify({"success": True, "price": float(price), "sample": "AAPL"})
             return jsonify({"success": False, "error": r.get("message") or "无法获取有效价格，请检查 API Key"}), 400
         else:
-            return jsonify({"success": False, "error": "未知数据源"}), 400
+            return jsonify({"success": False, "error": "未知数据源"}), 500
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1605,6 +1659,105 @@ def admin_refresh():
 
 
 # ------------------------------------------------------------------
+
+# ------------------------------------------------------------------
+# User uploads management
+# ------------------------------------------------------------------
+
+@app.route("/api/uploads")
+@jwt_required()
+def user_uploads():
+    user_id = get_jwt_identity()
+    rows = execute('''
+        SELECT id, filename, file_md5, stmt_date, account_id, status,
+               rows_inserted, error_message, created_at, completed_at
+        FROM xml_uploads
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+    ''', (user_id,))
+    return jsonify({"uploads": [dict(r) for r in rows]})
+
+
+@app.route("/api/uploads/<upload_id>", methods=["DELETE"])
+@jwt_required()
+def user_upload_delete(upload_id):
+    user_id = get_jwt_identity()
+    upload = execute_one(
+        "SELECT user_id, storage_path FROM xml_uploads WHERE id = %s",
+        (upload_id,)
+    )
+    if not upload:
+        return jsonify({"error": "Upload not found"}), 404
+    if str(upload["user_id"]) != str(user_id):
+        return jsonify({"error": "Forbidden"}), 403
+    # Delete physical file
+    path = upload.get("storage_path")
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+    # Delete upload record (flex_sync_logs will set upload_id NULL via FK)
+    with get_cursor() as cur:
+        cur.execute("DELETE FROM xml_uploads WHERE id = %s", (upload_id,))
+    return jsonify({"success": True})
+
+
+@app.route("/api/uploads/reset", methods=["POST"])
+@jwt_required()
+def user_upload_reset():
+    user_id = get_jwt_identity()
+    tables = [
+        "archive_account_information",
+        "archive_asset_summary",
+        "archive_cash_report_currency",
+        "archive_cash_transaction",
+        "archive_change_in_dividend_accrual",
+        "archive_change_in_nav",
+        "archive_change_in_position_value",
+        "archive_conversion_rate",
+        "archive_corporate_action",
+        "archive_equity_summary_by_report_date_in_base",
+        "archive_fdic_insured_deposits_by_bank_entry",
+        "archive_fifo_performance_summary_underlying",
+        "archive_flex_statement",
+        "archive_fx_lot",
+        "archive_fx_position",
+        "archive_interest_accruals_currency",
+        "archive_lot",
+        "archive_mtdytd_performance_summary_underlying",
+        "archive_mtm_performance_summary_underlying",
+        "archive_net_stock_position",
+        "archive_open_dividend_accrual",
+        "archive_open_position",
+        "archive_option_eae",
+        "archive_order",
+        "archive_prior_period_position",
+        "archive_security_info",
+        "archive_slb_activity",
+        "archive_slb_collateral",
+        "archive_slb_fee",
+        "archive_slb_open_contract",
+        "archive_statement_of_funds_line",
+        "archive_symbol_summary",
+        "archive_tier_interest_detail",
+        "archive_trade",
+        "archive_transfer",
+        "archive_unbundled_commission_detail",
+    ]
+    with get_cursor() as cur:
+        for tbl in tables:
+            cur.execute(f"DELETE FROM {tbl} WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM cash_report WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM cost_basis_history WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM cost_basis_snapshots WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM daily_nav WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM flex_sync_logs WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM market_prices WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM option_eae WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM positions WHERE user_id = %s", (user_id,))
+        cur.execute("DELETE FROM xml_uploads WHERE user_id = %s", (user_id,))
+    return jsonify({"success": True})
 # Static files (React SPA catch-all)
 # ------------------------------------------------------------------
 @app.route("/", defaults={"path": ""})

@@ -1,1 +1,5 @@
 config/.env
+*.log
+*.db
+.DS_Store
+._*

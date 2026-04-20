@@ -172,12 +172,14 @@ function PnlCalendar({ dailyPnL }) {
         </span>
         <button onClick={() => setCurrent(new Date(y, m + 1, 1))} className="rounded-md border px-2 py-1 text-xs">▶</button>
       </div>
-      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs text-[var(--gray)]">
-        {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
-          <div key={d}>{d}</div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
+      <div className="overflow-x-auto">
+        <div className="min-w-[300px]">
+          <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs text-[var(--gray)]">
+            {['日', '一', '二', '三', '四', '五', '六'].map((d) => (
+              <div key={d}>{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
         {days.map((d, i) => {
           if (d == null) return <div key={i} />;
           const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -198,6 +200,8 @@ function PnlCalendar({ dailyPnL }) {
             </div>
           );
         })}
+          </div>
+        </div>
       </div>
     </Card>
   );

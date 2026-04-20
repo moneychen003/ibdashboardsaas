@@ -57,7 +57,7 @@ export default function SettingsPanel() {
   const settingsOpen = useDashboardStore((s) => s.settingsOpen);
   const toggleSettings = useDashboardStore((s) => s.toggleSettings);
   const auth = useDashboardStore((s) => s.auth);
-  const isAdmin = auth?.user === 'moneychen';
+  const isAdmin = auth?.is_admin;
   const [activeTab, setActiveTab] = useState('status');
 
   if (!settingsOpen) return null;
@@ -71,7 +71,7 @@ export default function SettingsPanel() {
           <button onClick={toggleSettings} className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--light-gray)] bg-white text-lg">×</button>
         </div>
         <div className="flex gap-1 overflow-x-auto border-b border-[var(--light-gray)] px-4 py-2">
-          {TABS.filter((t) => isAdmin || t.id !== 'guest').map((t) => (
+          {TABS.filter((t) => isAdmin || !['ops','backups','market','guest','cleanup','webhook'].includes(t.id)).map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
@@ -969,6 +969,50 @@ function MarketTab() {
 function UploadTab() {
   const triggerUploadXml = useDashboardStore((s) => s.triggerUploadXml);
   const triggerUploadFolder = useDashboardStore((s) => s.triggerUploadFolder);
+  const uploadHistoryVersion = useDashboardStore((s) => s.uploadHistoryVersion);
+  const [uploads, setUploads] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  const loadUploads = async () => {
+    try {
+      const res = await api.userUploads();
+      setUploads(res.uploads || []);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    loadUploads();
+  }, [uploadHistoryVersion]);
+
+  const handleDelete = async (id) => {
+    if (!confirm('确定删除这条上传记录？')) return;
+    setLoading(true);
+    try {
+      await api.userUploadDelete(id);
+      await loadUploads();
+    } catch (e) {
+      alert('删除失败: ' + (e.message || '未知错误'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!confirm('⚠️ 确定重置所有数据？这将删除您所有的上传记录和持仓数据，不可恢复！')) return;
+    setResetting(true);
+    try {
+      await api.userUploadReset();
+      await loadUploads();
+      alert('所有数据已重置，请重新上传 XML。');
+    } catch (e) {
+      alert('重置失败: ' + (e.message || '未知错误'));
+    } finally {
+      setResetting(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -989,6 +1033,69 @@ function UploadTab() {
           📁 上传文件夹
         </button>
       </div>
+
+      {/* Upload History */}
+      <div className="rounded-lg border border-[var(--light-gray)] overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--light-gray)] bg-gray-50">
+          <h3 className="text-sm font-medium">📋 上传历史</h3>
+          <button
+            onClick={handleReset}
+            disabled={resetting}
+            className="text-xs text-red-600 hover:text-red-800 underline disabled:opacity-50"
+          >
+            {resetting ? '重置中...' : '⚠️ 重置所有数据'}
+          </button>
+        </div>
+        {uploads.length === 0 ? (
+          <div className="px-4 py-6 text-sm text-[var(--gray)] text-center">
+            暂无上传记录
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-[var(--gray)]">
+              <tr>
+                <th className="px-4 py-2 text-left">文件名</th>
+                <th className="px-4 py-2 text-left">日期</th>
+                <th className="px-4 py-2 text-left">状态</th>
+                <th className="px-4 py-2 text-left">记录数</th>
+                <th className="px-4 py-2 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {uploads.map((u) => (
+                <tr key={u.id} className="border-t border-[var(--light-gray)] hover:bg-gray-50">
+                  <td className="px-4 py-2 truncate max-w-[200px]" title={u.filename}>
+                    {u.filename}
+                  </td>
+                  <td className="px-4 py-2 whitespace-nowrap text-[var(--gray)]">
+                    {u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-'}
+                  </td>
+                  <td className="px-4 py-2">
+                    {u.status === 'done' ? (
+                      <span className="text-green-600">✅ 成功</span>
+                    ) : u.status === 'failed' ? (
+                      <span className="text-red-600" title={u.error_message}>❌ 失败</span>
+                    ) : (
+                      <span className="text-amber-600">⏳ {u.status}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">{u.rows_inserted || 0}</td>
+                  <td className="px-4 py-2 text-right">
+                    <button
+                      onClick={() => handleDelete(u.id)}
+                      disabled={loading}
+                      className="text-xs text-red-500 hover:text-red-700 underline disabled:opacity-50"
+                    >
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         💡 建议一次性把历史 XML 都传完，数据越完整，收益率、持仓归因、交易排名等高级分析就越准确。上传完成后页面会自动刷新。
       </div>

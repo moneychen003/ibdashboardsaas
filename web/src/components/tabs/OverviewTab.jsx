@@ -470,7 +470,7 @@ export default function OverviewTab() {
           <div className="mb-4 text-lg font-semibold">杠杆 & 资金效率</div>
           {(() => {
             const lm = data.leverageMetrics || {};
-            const hasData = lm.asOfDate != null;
+            const hasData = (lm.netLiquidation || 0) !== 0;
             if (!hasData) return <div className="py-10 text-center text-[var(--gray)]">暂无杠杆数据</div>;
             const stats = [
               { label: '净资产', value: fmtCur(lm.netLiquidation, displayCurrency) },

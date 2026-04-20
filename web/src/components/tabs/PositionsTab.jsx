@@ -53,6 +53,41 @@ function parseOptionFromSymbol(symbol = '', description = '') {
   return { underlying, expiry, putCall, strike };
 }
 
+function usePieGroups(positions, mode, totalCash) {
+  return useMemo(() => {
+    const groups = {};
+    if (mode === 'symbols') {
+      positions
+        .filter((p) => (p.assetType || p.assetCategory) !== 'OPTION')
+        .forEach((p) => {
+          const key = p.symbol || '其他';
+          groups[key] = (groups[key] || 0) + (p.positionValue || 0);
+        });
+    } else if (mode === 'options') {
+      positions
+        .filter((p) => (p.assetType || p.assetCategory) === 'OPTION')
+        .forEach((p) => {
+          const key = p.symbol || '期权';
+          groups[key] = (groups[key] || 0) + (p.positionValue || 0);
+        });
+    } else {
+      groups['股票'] = 0;
+      groups['ETF'] = 0;
+      groups['期权'] = 0;
+      groups['现金'] = totalCash || 0;
+      groups['其他'] = 0;
+      positions.forEach((p) => {
+        const type = p.assetType || p.assetCategory || 'STOCK';
+        if (type === 'STOCK') groups['股票'] += (p.positionValue || 0);
+        else if (type === 'ETF') groups['ETF'] += (p.positionValue || 0);
+        else if (type === 'OPTION') groups['期权'] += (p.positionValue || 0);
+        else groups['其他'] += (p.positionValue || 0);
+      });
+    }
+    return groups;
+  }, [positions, mode, totalCash]);
+}
+
 function PositionPie({ positions, mode, totalCash }) {
   const groups = usePieGroups(positions, mode, totalCash);
   const data = Object.entries(groups).map(([name, value]) => ({ name, value }));
@@ -92,7 +127,7 @@ function PositionPie({ positions, mode, totalCash }) {
 function PositionPieStats({ positions, mode, totalCash }) {
   const groups = usePieGroups(positions, mode, totalCash);
   const total = Object.values(groups).reduce((s, v) => s + v, 0);
-  const colors = { 股票: '#000000', ETF: '#6366f1', 期权: '#ef4444', 现金: '#10b981' };
+  const palette = ['#000000', '#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316'];
 
   const todayPnl = positions.reduce((s, p) => s + (p.dailyPnl || 0), 0);
   const unrealizedPnl = positions.reduce((s, p) => s + (p.unrealizedPnl || 0), 0);
@@ -102,11 +137,11 @@ function PositionPieStats({ positions, mode, totalCash }) {
 
   const items = Object.entries(groups)
     .sort((a, b) => b[1] - a[1])
-    .map(([name, value]) => ({
+    .map(([name, value], index) => ({
       name,
       value,
       pct: total > 0 ? (value / total) * 100 : 0,
-      color: colors[name] || '#94a3b8',
+      color: palette[index % palette.length],
     }));
 
   return (
@@ -185,8 +220,9 @@ function OptionExpiry({ options }) {
   opts.sort((a, b) => a.days - b.days);
 
   return (
-    <div>
-      <div className="mb-2 grid grid-cols-[50px_70px_50px_1fr_50px_70px_80px_60px_80px_85px_85px_85px] gap-2 rounded-t-lg bg-[var(--lighter-gray)] px-3 py-2 text-xs font-semibold text-[var(--gray)]">
+    <div className="overflow-x-auto">
+      <div className="min-w-[800px]">
+        <div className="mb-2 grid grid-cols-[50px_70px_50px_1fr_50px_70px_80px_60px_80px_85px_85px_85px] gap-2 rounded-t-lg bg-[var(--lighter-gray)] px-3 py-2 text-xs font-semibold text-[var(--gray)]">
         <div className="text-center">天数</div>
         <div>标的</div>
         <div>类型</div>
@@ -229,6 +265,7 @@ function OptionExpiry({ options }) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -237,7 +274,7 @@ function PositionPnl({ positions, costMode }) {
   const rows = positions
     .map((p) => {
       const costPrice = costMode === 'diluted' ? (p.dilutedCostBasisPrice || 0) : (p.avgCostBasisPrice || 0);
-      const qty = p.markPrice ? p.positionValue / p.markPrice : 0;
+      const qty = p.quantity != null ? p.quantity : (p.markPrice ? p.positionValue / p.markPrice : 0);
       const costMoney = costPrice && qty ? costPrice * qty : (costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0));
       const unrealized = (p.positionValue || 0) - costMoney;
       return {
@@ -302,14 +339,14 @@ export default function PositionsTab() {
 
   const totalUnrealized = filteredPositions.reduce((s, p) => {
     const costPrice = costMode === 'diluted' ? (p.dilutedCostBasisPrice || 0) : (p.avgCostBasisPrice || 0);
-    const qty = p.markPrice ? p.positionValue / p.markPrice : 0;
+    const qty = p.quantity != null ? p.quantity : (p.markPrice ? p.positionValue / p.markPrice : 0);
     const costMoney = costPrice && qty ? costPrice * qty : (costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0));
     return s + ((p.positionValue || 0) - costMoney);
   }, 0);
 
   const sortedPositions = useMemo(() => {
     const enriched = filteredPositions.map((p) => {
-      const qty = p.markPrice ? p.positionValue / p.markPrice : 0;
+      const qty = p.quantity != null ? p.quantity : (p.markPrice ? p.positionValue / p.markPrice : 0);
       const costPrice = costMode === 'diluted' ? (p.dilutedCostBasisPrice || 0) : (p.avgCostBasisPrice || 0);
       const costMoney = costPrice && qty ? costPrice * qty : (costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0));
       const unrealized = (p.positionValue || 0) - costMoney;
@@ -432,7 +469,7 @@ export default function PositionsTab() {
         <div className="mb-3 text-sm">
           筛选结果: <span className="font-semibold">{filteredPositions.length}</span> 只持仓
           <span className="mx-2 text-[var(--gray)]">|</span>
-          总市值: <span className="font-semibold">{fmtCur(filteredPositions.reduce((s, p) => s + (p.positionValue || 0), 0))}</span>
+          总市值: <span className="font-semibold">{fmtCur(filteredPositions.reduce((s, p) => s + (p.positionValueInBase || p.positionValue || 0), 0))}</span>
           <span className="mx-2 text-[var(--gray)]">|</span>
           未实现盈亏:
           <span className={`ml-1 font-semibold ${totalUnrealized >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
@@ -463,7 +500,7 @@ export default function PositionsTab() {
                   <td className="py-2 text-right">{p.qty.toFixed(2)}</td>
                   <td className="py-2 text-right">{fmtCur(p.costPrice)}</td>
                   <td className="py-2 text-right">{fmtCur(p.markPrice || 0)}</td>
-                  <td className="py-2 text-right">{fmtCur(p.positionValue || 0)}</td>
+                  <td className="py-2 text-right">{fmtCur(p.positionValueInBase || p.positionValue || 0)}</td>
                   <td className={`py-2 text-right font-semibold ${p.unrealized >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
                     {p.unrealized >= 0 ? '+' : ''}{fmtCur(p.unrealized)}
                   </td>
