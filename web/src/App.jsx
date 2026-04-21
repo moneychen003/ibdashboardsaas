@@ -11,6 +11,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import AdminPage from './pages/AdminPage';
 import HelpPage from './pages/HelpPage';
+import PublicSharePage from './pages/PublicSharePage';
 
 function DashboardRoute() {
   const { account, tab } = useParams();
@@ -61,6 +62,18 @@ function DashboardRoute() {
     }
   }, [account, tab, currentAccount, accounts.length, location.pathname, navigate]);
 
+  const shareMode = useDashboardStore((s) => s.shareMode);
+
+  // Share mode: redirect to first allowed tab if current tab is not allowed
+  useEffect(() => {
+    if (!shareMode || !tab) return;
+    const allowed = shareMode.allowedTabs || ['overview'];
+    if (!allowed.includes(tab)) {
+      const firstTab = allowed[0];
+      navigate(`/${account || currentAccount || 'combined'}/${firstTab}${location.search}`, { replace: true });
+    }
+  }, [tab, shareMode, account, currentAccount, location.search, navigate]);
+
   const loadedSlices = useDashboardStore((s) => s.loadedSlices);
   const isTabLoading = !!tabLoading[activeTab];
   const sliceMap = { overview: 'overview', positions: 'positions', performance: 'performance', details: 'details', changes: 'changes' };
@@ -110,6 +123,7 @@ export default function App() {
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/admin" element={<RequireAuth><AdminPage /></RequireAuth>} />
       <Route path="/help" element={<HelpPage />} />
+      <Route path="/share/:token" element={<PublicSharePage />} />
       <Route path="/" element={<DashboardRoute />} />
       <Route path="/:account" element={<DashboardRoute />} />
       <Route path="/:account/:tab" element={<DashboardRoute />} />

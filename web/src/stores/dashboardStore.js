@@ -6,6 +6,10 @@ export const useDashboardStore = create((set, get) => ({
   auth: null,
   setAuth: (auth) => set({ auth }),
 
+  // Share mode
+  shareMode: null, // { token, allowedTabs, accountId } or null
+  setShareMode: (mode) => set({ shareMode: mode }),
+
   // Accounts
   accounts: [],
   currentAccount: 'combined',
@@ -144,6 +148,27 @@ export const useDashboardStore = create((set, get) => ({
 
   // Actions
   initAuth: async () => {
+    // Check share mode first
+    const urlParams = new URLSearchParams(window.location.search);
+    const shareToken = urlParams.get('share_token');
+    if (shareToken) {
+      try {
+        const cfg = await api.getShareConfig(shareToken);
+        set({
+          shareMode: {
+            token: shareToken,
+            allowedTabs: cfg.allowed_tabs || ['overview'],
+            accountId: cfg.account_id || 'combined',
+          },
+          auth: { modules: Object.fromEntries((cfg.allowed_tabs || ['overview']).map((t) => [t, true])) },
+          currentAccount: cfg.account_id || 'combined',
+        });
+      } catch (e) {
+        set({ shareMode: null, auth: null });
+      }
+      return;
+    }
+
     const token = localStorage.getItem('token');
     if (!token) {
       set({ auth: null });
@@ -159,6 +184,17 @@ export const useDashboardStore = create((set, get) => ({
   },
 
   loadAccounts: async () => {
+    // Share mode: construct a fake single account list
+    const shareMode = get().shareMode;
+    if (shareMode) {
+      const alias = shareMode.accountId;
+      const accounts = alias === 'combined'
+        ? [{ alias: 'combined', label: '全部账户', color: '#111', isDefault: true }]
+        : [{ alias, label: alias, color: '#111', isDefault: true }];
+      set({ accounts, currentAccount: alias });
+      return;
+    }
+
     const { accounts } = await api.accounts(get()._adminParams());
     
     // 检查 URL 中的 Admin 预览参数，优先使用
@@ -194,11 +230,26 @@ export const useDashboardStore = create((set, get) => ({
     return '';
   },
 
+  _shareParams: () => {
+    const params = new URLSearchParams(window.location.search);
+    const shareToken = params.get('share_token');
+    if (shareToken) {
+      return `?share_token=${encodeURIComponent(shareToken)}`;
+    }
+    return '';
+  },
+
   loadOverview: async (alias) => {
     const target = alias || get().currentAccount;
+    const shareMode = get().shareMode;
     set({ loading: true, error: null });
     try {
-      const payload = await api.dashboardOverview(target, get()._adminParams());
+      let payload;
+      if (shareMode) {
+        payload = await api.shareDashboard(shareMode.token, target);
+      } else {
+        payload = await api.dashboardOverview(target, get()._adminParams());
+      }
       set((s) => ({
         data: { ...(s.data || {}), ...payload },
         loading: false,
@@ -211,6 +262,7 @@ export const useDashboardStore = create((set, get) => ({
 
   loadTabData: async (tab, alias) => {
     const target = alias || get().currentAccount;
+    const shareMode = get().shareMode;
     const sliceMap = {
       overview: 'overview',
       positions: 'positions',
@@ -232,16 +284,20 @@ export const useDashboardStore = create((set, get) => ({
     set((s) => ({ tabLoading: { ...s.tabLoading, [tab]: true } }));
     try {
       let payload;
-      if (tab === 'overview') {
-        payload = await api.dashboardOverview(target, get()._adminParams());
-      } else if (tab === 'positions') {
-        payload = await api.dashboardPositions(target, get()._adminParams());
-      } else if (tab === 'performance') {
-        payload = await api.dashboardPerformance(target, get()._adminParams());
-      } else if (tab === 'details') {
-        payload = await api.dashboardDetails(target, get()._adminParams());
-      } else if (tab === 'changes') {
-        payload = await api.dashboardChanges(target, get()._adminParams());
+      if (shareMode) {
+        payload = await api.shareDashboardSlice(shareMode.token, target, sliceName);
+      } else {
+        if (tab === 'overview') {
+          payload = await api.dashboardOverview(target, get()._adminParams());
+        } else if (tab === 'positions') {
+          payload = await api.dashboardPositions(target, get()._adminParams());
+        } else if (tab === 'performance') {
+          payload = await api.dashboardPerformance(target, get()._adminParams());
+        } else if (tab === 'details') {
+          payload = await api.dashboardDetails(target, get()._adminParams());
+        } else if (tab === 'changes') {
+          payload = await api.dashboardChanges(target, get()._adminParams());
+        }
       }
       set((s) => ({
         data: { ...(s.data || {}), ...payload },

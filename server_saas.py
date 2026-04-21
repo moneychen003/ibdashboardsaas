@@ -8,6 +8,7 @@ import sys
 import io
 import csv
 import uuid
+import secrets
 from datetime import datetime, timedelta
 import time
 from functools import wraps
@@ -1759,6 +1760,151 @@ def user_upload_reset():
         cur.execute("DELETE FROM positions WHERE user_id = %s", (user_id,))
         cur.execute("DELETE FROM xml_uploads WHERE user_id = %s", (user_id,))
     return jsonify({"success": True})
+
+
+# ------------------------------------------------------------------
+# Share Links (公开分享面板)
+# ------------------------------------------------------------------
+def _get_share_link(token: str):
+    """Fetch and validate a share link by token."""
+    row = execute_one("""
+        SELECT id, user_id, token, allowed_tabs, account_id, expires_at, is_active, created_at
+        FROM share_links
+        WHERE token = %s
+    """, (token,))
+    if not row:
+        return None
+    if not row.get("is_active"):
+        return None
+    if row.get("expires_at") and row["expires_at"] < datetime.now().astimezone():
+        return None
+    return row
+
+
+@app.route("/api/share", methods=["POST"])
+@jwt_required()
+def api_create_share():
+    """Create a new share link for the current user."""
+    user_id = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    allowed_tabs = data.get("allowed_tabs", ["overview"])
+    account_id = data.get("account_id", "combined")
+    expires_days = data.get("expires_days", 30)
+    token = secrets.token_urlsafe(16)
+    expires_at = None
+    if expires_days and expires_days > 0:
+        expires_at = datetime.now().astimezone() + timedelta(days=expires_days)
+    with get_cursor() as cur:
+        cur.execute("""
+            INSERT INTO share_links (user_id, token, allowed_tabs, account_id, expires_at)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, token, allowed_tabs, account_id, expires_at, created_at
+        """, (user_id, token, allowed_tabs, account_id, expires_at))
+        row = cur.fetchone()
+    return jsonify({
+        "id": str(row["id"]),
+        "token": row["token"],
+        "allowed_tabs": row["allowed_tabs"],
+        "account_id": row["account_id"],
+        "expires_at": row["expires_at"].isoformat() if row["expires_at"] else None,
+        "created_at": row["created_at"].isoformat(),
+        "share_url": f"/share/{row['token']}"
+    })
+
+
+@app.route("/api/share", methods=["GET"])
+@jwt_required()
+def api_list_shares():
+    """List all share links for the current user."""
+    user_id = get_jwt_identity()
+    rows = execute("""
+        SELECT id, token, allowed_tabs, account_id, expires_at, is_active, created_at
+        FROM share_links
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+    """, (user_id,))
+    result = []
+    for r in rows:
+        is_expired = r.get("expires_at") and r["expires_at"] < datetime.now().astimezone()
+        result.append({
+            "id": str(r["id"]),
+            "token": r["token"],
+            "allowed_tabs": r["allowed_tabs"],
+            "account_id": r["account_id"],
+            "expires_at": r["expires_at"].isoformat() if r["expires_at"] else None,
+            "is_active": r["is_active"] and not is_expired,
+            "created_at": r["created_at"].isoformat(),
+            "share_url": f"/share/{r['token']}"
+        })
+    return jsonify({"shares": result})
+
+
+@app.route("/api/share/<token>", methods=["DELETE"])
+@jwt_required()
+def api_delete_share(token):
+    """Delete a share link."""
+    user_id = get_jwt_identity()
+    with get_cursor() as cur:
+        cur.execute("""
+            DELETE FROM share_links
+            WHERE token = %s AND user_id = %s
+        """, (token, user_id))
+        if cur.rowcount == 0:
+            return jsonify({"error": "Not found"}), 404
+    return jsonify({"success": True})
+
+
+@app.route("/api/share/<token>", methods=["GET"])
+def api_get_share(token):
+    """Public: get share link config (no auth required)."""
+    link = _get_share_link(token)
+    if not link:
+        return jsonify({"error": "Invalid or expired share link"}), 404
+    user = execute_one("SELECT username, email FROM users WHERE id = %s", (link["user_id"],))
+    return jsonify({
+        "token": link["token"],
+        "allowed_tabs": link["allowed_tabs"],
+        "account_id": link["account_id"],
+        "owner": user["username"] if user else None,
+        "expires_at": link["expires_at"].isoformat() if link["expires_at"] else None,
+    })
+
+
+@app.route("/api/share/<token>/dashboard/<alias>", methods=["GET"])
+def api_share_dashboard(token, alias):
+    """Public: get full dashboard data via share link."""
+    link = _get_share_link(token)
+    if not link:
+        return jsonify({"error": "Invalid or expired share link"}), 404
+    if alias != link["account_id"]:
+        return jsonify({"error": "Account not shared"}), 403
+    payload = _generate_dashboard_for_account(str(link["user_id"]), alias)
+    if payload is None:
+        return jsonify({"error": "Data not found"}), 404
+    resp = jsonify(payload)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
+@app.route("/api/share/<token>/dashboard/<alias>/<slice_name>", methods=["GET"])
+def api_share_dashboard_slice(token, alias, slice_name):
+    """Public: get dashboard slice via share link."""
+    link = _get_share_link(token)
+    if not link:
+        return jsonify({"error": "Invalid or expired share link"}), 404
+    if alias != link["account_id"]:
+        return jsonify({"error": "Account not shared"}), 403
+    allowed = link.get("allowed_tabs") or []
+    if slice_name not in allowed:
+        return jsonify({"error": "This tab is not shared"}), 403
+    payload = _generate_dashboard_for_account(str(link["user_id"]), alias)
+    if payload is None:
+        return jsonify({"error": "Data not found"}), 404
+    resp = jsonify(_slice_payload(payload, slice_name))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
 # Static files (React SPA catch-all)
 # ------------------------------------------------------------------
 @app.route("/", defaults={"path": ""})

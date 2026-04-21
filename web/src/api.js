@@ -127,4 +127,12 @@ export const api = {
   marketUpdate: () => fetchJson('/api/market/update', { method: 'POST' }),
   marketUpdateStatus: (jobId) => fetchJson(`/api/market/update/status/${jobId}`),
   marketTest: (source, apiKey) => fetchJson(`/api/market/test/${source}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: apiKey }) }),
+
+  // Share links
+  createShare: (data) => fetchJson('/api/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  listShares: () => fetchJson('/api/share'),
+  deleteShare: (token) => fetchJson(`/api/share/${token}`, { method: 'DELETE' }),
+  getShareConfig: (token) => fetchJson(`/api/share/${token}`),
+  shareDashboard: (token, alias) => fetchJson(`/api/share/${token}/dashboard/${alias}`),
+  shareDashboardSlice: (token, alias, slice) => fetchJson(`/api/share/${token}/dashboard/${alias}/${slice}`),
 };

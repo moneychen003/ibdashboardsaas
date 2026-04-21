@@ -705,3 +705,19 @@ CREATE TABLE IF NOT EXISTS market_prices (
     PRIMARY KEY (user_id, symbol)
 );
 CREATE INDEX IF NOT EXISTS idx_market_prices_user ON market_prices(user_id);
+
+-- ------------------------------------------------------------------
+-- Share Links (公开分享面板)
+-- ------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS share_links (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT UNIQUE NOT NULL,
+    allowed_tabs TEXT[] DEFAULT ARRAY['overview'],
+    account_id TEXT DEFAULT 'combined',
+    expires_at TIMESTAMPTZ,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_share_links_token ON share_links(token);
+CREATE INDEX idx_share_links_user ON share_links(user_id, created_at DESC);

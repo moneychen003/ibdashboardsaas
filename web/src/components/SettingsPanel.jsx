@@ -5,6 +5,7 @@ import { api } from '../api';
 const TABS = [
   { id: 'status', label: '系统状态' },
   { id: 'upload', label: '导入数据' },
+  { id: 'share', label: '分享面板' },
   { id: 'ops', label: '数据运维' },
   { id: 'backups', label: '备份恢复' },
   { id: 'accounts', label: '账户与货币' },
@@ -86,6 +87,7 @@ export default function SettingsPanel() {
         <div className="h-[calc(100vh-64px-120px)] overflow-y-auto p-5">
           {activeTab === 'status' && <StatusTab />}
           {activeTab === 'upload' && <UploadTab />}
+          {activeTab === 'share' && <ShareTab />}
           {activeTab === 'ops' && <OpsTab />}
           {activeTab === 'backups' && <BackupsTab />}
           {activeTab === 'accounts' && <AccountsTab />}
@@ -1098,6 +1100,184 @@ function UploadTab() {
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         💡 建议一次性把历史 XML 都传完，数据越完整，收益率、持仓归因、交易排名等高级分析就越准确。上传完成后页面会自动刷新。
+      </div>
+    </div>
+  );
+}
+
+// ---------- Share Tab ----------
+const SHARE_TAB_OPTIONS = [
+  { key: 'overview', label: '📊 总览' },
+  { key: 'positions', label: '💼 持仓' },
+  { key: 'performance', label: '📈 业绩' },
+  { key: 'details', label: '📝 明细' },
+  { key: 'changes', label: '📋 变动' },
+];
+
+function ShareTab() {
+  const accounts = useDashboardStore((s) => s.accounts);
+  const [selectedTabs, setSelectedTabs] = useState(['overview']);
+  const [selectedAccount, setSelectedAccount] = useState('combined');
+  const [expiresDays, setExpiresDays] = useState(30);
+  const [shares, setShares] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [copiedToken, setCopiedToken] = useState(null);
+
+  const fetchShares = async () => {
+    setLoading(true);
+    try {
+      const data = await api.listShares();
+      setShares(data.shares || []);
+    } catch (e) {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchShares();
+  }, []);
+
+  const handleCreate = async () => {
+    if (selectedTabs.length === 0) return;
+    setCreating(true);
+    try {
+      const res = await api.createShare({
+        allowed_tabs: selectedTabs,
+        account_id: selectedAccount,
+        expires_days: parseInt(expiresDays) || 30,
+      });
+      setShares((prev) => [res, ...prev]);
+    } catch (e) {
+      alert('创建失败: ' + (e.message || '未知错误'));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDelete = async (token) => {
+    if (!confirm('确定删除该分享链接？')) return;
+    try {
+      await api.deleteShare(token);
+      setShares((prev) => prev.filter((s) => s.token !== token));
+    } catch (e) {
+      alert('删除失败');
+    }
+  };
+
+  const copyLink = (token, url) => {
+    const fullUrl = window.location.origin + url;
+    navigator.clipboard.writeText(fullUrl).then(() => {
+      setCopiedToken(token);
+      setTimeout(() => setCopiedToken(null), 2000);
+    });
+  };
+
+  const nonCombinedAccounts = accounts.filter((a) => a.alias !== 'combined');
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg border border-[var(--light-gray)] p-4">
+        <div className="mb-3 text-sm font-semibold">创建新的分享链接</div>
+        <div className="mb-3">
+          <div className="mb-1 text-xs text-[var(--gray)]">选择要展示的页面</div>
+          <div className="flex flex-wrap gap-2">
+            {SHARE_TAB_OPTIONS.map((t) => (
+              <label key={t.key} className="flex cursor-pointer items-center gap-1.5 rounded-md border border-[var(--light-gray)] px-3 py-1.5 text-sm hover:bg-[var(--lighter-gray)]">
+                <input
+                  type="checkbox"
+                  checked={selectedTabs.includes(t.key)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelectedTabs((prev) => [...prev, t.key]);
+                    } else {
+                      setSelectedTabs((prev) => prev.filter((k) => k !== t.key));
+                    }
+                  }}
+                  className="h-4 w-4"
+                />
+                {t.label}
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="mb-3">
+          <div className="mb-1 text-xs text-[var(--gray)]">选择要分享的账户</div>
+          <select
+            value={selectedAccount}
+            onChange={(e) => setSelectedAccount(e.target.value)}
+            className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
+          >
+            <option value="combined">全部账户 (combined)</option>
+            {nonCombinedAccounts.map((a) => (
+              <option key={a.alias} value={a.alias}>{a.label || a.alias}</option>
+            ))}
+          </select>
+        </div>
+        <div className="mb-3">
+          <div className="mb-1 text-xs text-[var(--gray)]">有效期（天）</div>
+          <select
+            value={expiresDays}
+            onChange={(e) => setExpiresDays(e.target.value)}
+            className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
+          >
+            <option value={7}>7 天</option>
+            <option value={30}>30 天</option>
+            <option value={90}>90 天</option>
+            <option value={365}>1 年</option>
+            <option value={0}>永久有效</option>
+          </select>
+        </div>
+        <button
+          onClick={handleCreate}
+          disabled={creating || selectedTabs.length === 0}
+          className="w-full rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {creating ? '创建中...' : '生成分享链接'}
+        </button>
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-semibold">已创建的链接</div>
+        {loading ? (
+          <div className="text-sm text-[var(--gray)]">加载中...</div>
+        ) : shares.length === 0 ? (
+          <div className="text-sm text-[var(--gray)]">暂无分享链接</div>
+        ) : (
+          <div className="space-y-2">
+            {shares.map((s) => (
+              <div key={s.token} className={`rounded-lg border p-3 ${s.is_active ? 'border-[var(--light-gray)]' : 'border-red-200 bg-red-50 opacity-60'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="text-sm">
+                    <span className="font-medium">{s.account_id}</span>
+                    <span className="ml-2 text-xs text-[var(--gray)]">
+                      {s.allowed_tabs?.map((t) => SHARE_TAB_OPTIONS.find((o) => o.key === t)?.label || t).join(' · ')}
+                    </span>
+                  </div>
+                  <button onClick={() => handleDelete(s.token)} className="text-xs text-red-500 hover:text-red-700">删除</button>
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={window.location.origin + s.share_url}
+                    className="flex-1 rounded border border-[var(--light-gray)] px-2 py-1 text-xs"
+                  />
+                  <button
+                    onClick={() => copyLink(s.token, s.share_url)}
+                    className="rounded border border-[var(--light-gray)] px-2 py-1 text-xs hover:bg-[var(--lighter-gray)]"
+                  >
+                    {copiedToken === s.token ? '已复制' : '复制'}
+                  </button>
+                </div>
+                <div className="mt-1 text-xs text-[var(--gray)]">
+                  {s.is_active ? `有效期至: ${s.expires_at ? new Date(s.expires_at).toLocaleString('zh-CN') : '永久'}` : '已过期'}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

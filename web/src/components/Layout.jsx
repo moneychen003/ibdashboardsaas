@@ -22,6 +22,7 @@ export default function Layout({ children }) {
   const data = useDashboardStore((s) => s.data);
   const registerUploadFns = useDashboardStore((s) => s.registerUploadFns);
   const bumpUploadHistory = useDashboardStore((s) => s.bumpUploadHistory);
+  const shareMode = useDashboardStore((s) => s.shareMode);
 
   const [updateTime, setUpdateTime] = useState('');
   const [uploadQueue, setUploadQueue] = useState([]);
@@ -53,13 +54,14 @@ export default function Layout({ children }) {
   const modules = auth?.modules || { overview: true, positions: true, performance: true, details: true, changes: true };
   const isAdmin = auth?.is_admin;
   const current = accounts.find((a) => a.alias === currentAccount);
+  const isShareMode = !!shareMode;
 
   const tabs = [
-    { id: 'overview', label: '📊 总览', show: modules.overview },
-    { id: 'positions', label: '💼 持仓', show: modules.positions },
-    { id: 'performance', label: '📈 业绩', show: modules.performance },
-    { id: 'details', label: '📝 明细', show: modules.details },
-    { id: 'changes', label: '📋 变动', show: modules.changes },
+    { id: 'overview', label: '📊 总览', text: '总览', show: modules.overview },
+    { id: 'positions', label: '💼 持仓', text: '持仓', show: modules.positions },
+    { id: 'performance', label: '📈 业绩', text: '业绩', show: modules.performance },
+    { id: 'details', label: '📝 明细', text: '明细', show: modules.details },
+    { id: 'changes', label: '📋 变动', text: '变动', show: modules.changes },
   ].filter((t) => t.show);
 
   function navigateToAccount(alias) {
@@ -173,32 +175,41 @@ export default function Layout({ children }) {
       <nav className="sticky top-0 z-50 border-b border-[var(--light-gray)] bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-3 md:px-6">
           <div className="flex items-center gap-4">
-            <a href="/" className="flex items-center gap-2 font-semibold text-lg">
+            <a href={isShareMode ? `/${currentAccount || 'combined'}/overview${window.location.search}` : '/'} className="flex items-center gap-2 font-semibold text-lg">
               <img src="/logo.jpg" alt="logo" className="h-8 w-8 rounded-lg object-cover" />
               <span className="hidden sm:inline">IB Dashboard</span>
             </a>
             {accounts.length > 0 && (
-              <div className="relative group">
-                <button className="flex items-center gap-1 rounded-lg border border-[var(--light-gray)] px-3 py-1.5 pb-2 text-sm font-medium hover:border-black">
-                  <span className="hidden sm:inline">{current?.label || '加载中'}</span>
-                  <span className="sm:hidden">{current?.label?.replace('合并总资产', '总资产') || '加载中'}</span>
-                  <span>▾</span>
-                </button>
-                <div className="absolute top-full left-0 hidden min-w-[160px] rounded-lg border border-[var(--light-gray)] bg-white shadow-lg group-hover:block hover:block overflow-hidden">
-                  {accounts.map((acc) => (
-                    <div
-                      key={acc.alias}
-                      onClick={() => navigateToAccount(acc.alias)}
-                      className={classNames(
-                        'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--lighter-gray)]',
-                        acc.alias === currentAccount && 'font-semibold'
-                      )}
-                    >
-                      <span className="h-2 w-2 rounded-full" style={{ background: acc.color }} />
-                      <span>{acc.label}</span>
+              <div className={isShareMode && accounts.length === 1 ? '' : 'relative group'}>
+                {isShareMode && accounts.length === 1 ? (
+                  <span className="flex items-center gap-1 rounded-lg border border-[var(--light-gray)] px-3 py-1.5 pb-2 text-sm font-medium">
+                    <span className="hidden sm:inline">{current?.label || '加载中'}</span>
+                    <span className="sm:hidden">{current?.label?.replace('合并总资产', '总资产').replace('全部账户', '账户') || '加载中'}</span>
+                  </span>
+                ) : (
+                  <>
+                    <button className="flex items-center gap-1 rounded-lg border border-[var(--light-gray)] px-3 py-1.5 pb-2 text-sm font-medium whitespace-nowrap hover:border-black">
+                      <span className="hidden sm:inline">{current?.label || '加载中'}</span>
+                      <span className="sm:hidden">{current?.label?.replace('合并总资产', '总资产').replace('全部账户', '账户') || '加载中'}</span>
+                      <span>▾</span>
+                    </button>
+                    <div className="absolute top-full left-0 hidden min-w-[160px] rounded-lg border border-[var(--light-gray)] bg-white shadow-lg group-hover:block hover:block overflow-hidden">
+                      {accounts.map((acc) => (
+                        <div
+                          key={acc.alias}
+                          onClick={() => navigateToAccount(acc.alias)}
+                          className={classNames(
+                            'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--lighter-gray)]',
+                            acc.alias === currentAccount && 'font-semibold'
+                          )}
+                        >
+                          <span className="h-2 w-2 rounded-full" style={{ background: acc.color }} />
+                          <span>{acc.label}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -213,7 +224,8 @@ export default function Layout({ children }) {
                   activeTab === t.id ? 'bg-[var(--lighter-gray)] text-black' : 'text-[var(--gray)] hover:bg-[var(--lighter-gray)] hover:text-black'
                 )}
               >
-                {t.label}
+                <span className="hidden sm:inline">{t.label}</span>
+                <span className="sm:hidden">{t.text}</span>
               </button>
             ))}
           </div>
@@ -237,7 +249,7 @@ export default function Layout({ children }) {
               onChange={handleFolderChange}
             />
 
-            {isAdmin && (
+            {!isShareMode && isAdmin && (
               <button
                 onClick={() => navigate('/admin')}
                 className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
@@ -247,49 +259,59 @@ export default function Layout({ children }) {
               </button>
             )}
 
-            {auth?.email ? (
+            {!isShareMode && (
               <>
-                <span className="rounded-lg border border-[var(--light-gray)] bg-[var(--lighter-gray)] px-2 py-1.5 text-sm font-medium max-w-[120px] truncate md:px-3">
-                  {auth.email}
-                </span>
-                <button
-                  onClick={() => {
-                    localStorage.removeItem('token');
-                    window.location.href = '/login';
-                  }}
-                  className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
-                >
-                  <span className="hidden md:inline">退出</span>
-                  <span className="md:hidden">↪</span>
-                </button>
+                {auth?.email ? (
+                  <div className="relative group">
+                    <button className="flex items-center gap-1 rounded-lg border border-[var(--light-gray)] bg-[var(--lighter-gray)] px-2 py-1.5 text-sm font-medium whitespace-nowrap md:px-3">
+                      <span className="sm:hidden">我的</span>
+                      <span className="hidden sm:inline truncate max-w-[120px]">{auth.email}</span>
+                      <span className="text-[var(--gray)]">▾</span>
+                    </button>
+                    <div className="absolute right-0 top-full hidden min-w-[140px] rounded-lg border border-[var(--light-gray)] bg-white shadow-lg group-hover:block hover:block overflow-hidden z-50">
+                      <div className="px-3 py-2 text-xs text-[var(--gray)] border-b border-[var(--light-gray)]">
+                        {auth.email}
+                      </div>
+                      <button
+                        onClick={() => { toggleSettings(); }}
+                        className="block w-full px-3 py-2 text-left text-sm hover:bg-[var(--lighter-gray)]"
+                      >
+                        ⚙️ 设置
+                      </button>
+                      <button
+                        onClick={() => {
+                          localStorage.removeItem('token');
+                          window.location.href = '/login';
+                        }}
+                        className="block w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                      >
+                        退出登录
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <a
+                    href="/login"
+                    className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
+                  >
+                    登录
+                  </a>
+                )}
               </>
-            ) : (
-              <a
-                href="/login"
-                className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
-              >
-                登录
-              </a>
             )}
 
-            {FEATURES.enablePromotion && (
-              <CommunityButton onClick={() => setModalOpen(true)} />
-            )}
+            <span className="hidden sm:inline">
+              {FEATURES.enablePromotion && (
+                <CommunityButton onClick={() => setModalOpen(true)} />
+              )}
+            </span>
 
             <button
               onClick={() => navigate('/help')}
-              className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
+              className="hidden sm:inline rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
             >
               ❓<span className="hidden md:inline"> 帮助</span>
             </button>
-            {auth?.email && (
-              <button
-                onClick={toggleSettings}
-                className="rounded-lg border border-[var(--light-gray)] px-2 py-1.5 text-sm hover:border-black hover:bg-black hover:text-white md:px-3"
-              >
-                ⚙️<span className="hidden md:inline"> 设置</span>
-              </button>
-            )}
           </div>
         </div>
       </nav>
@@ -335,7 +357,7 @@ export default function Layout({ children }) {
         </div>
       )}
 
-      {data?.isDemo && (
+      {!isShareMode && data?.isDemo && (
         <div className="mx-auto max-w-[1400px] px-3 pt-3 md:px-6 md:pt-4">
           <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-amber-900">
             <div className="text-sm">
