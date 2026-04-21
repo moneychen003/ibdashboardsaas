@@ -1797,9 +1797,9 @@ def api_create_share():
     with get_cursor() as cur:
         cur.execute("""
             INSERT INTO share_links (user_id, token, allowed_tabs, account_id, expires_at)
-            VALUES (%s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s::jsonb, %s, %s)
             RETURNING id, token, allowed_tabs, account_id, expires_at, created_at
-        """, (user_id, token, allowed_tabs, account_id, expires_at))
+        """, (user_id, token, json.dumps(allowed_tabs), account_id, expires_at))
         row = cur.fetchone()
     return jsonify({
         "id": str(row["id"]),
