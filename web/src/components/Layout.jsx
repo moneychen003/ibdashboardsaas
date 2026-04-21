@@ -63,11 +63,11 @@ export default function Layout({ children }) {
   ].filter((t) => t.show);
 
   function navigateToAccount(alias) {
-    navigate(`/${alias}/${tab || activeTab || 'overview'}`);
+    navigate(`/${alias}/${tab || activeTab || 'overview'}${window.location.search}`);
   }
 
   function navigateToTab(tabId) {
-    navigate(`/${account || currentAccount || 'combined'}/${tabId}`);
+    navigate(`/${account || currentAccount || 'combined'}/${tabId}${window.location.search}`);
   }
 
   function isAnyUploading() {
