@@ -32,6 +32,7 @@ from utils.crypto_token import encrypt_token, decrypt_token
 from utils.quotas import check_account_limit, get_user_limits
 from utils import backups as backup_utils
 from workers.alerting import run_alerts
+from utils.telegram import send_telegram_message
 
 # ------------------------------------------------------------------
 # Config
@@ -278,6 +279,84 @@ def api_accounts():
         "isDefault": True
     })
     return jsonify({"accounts": result})
+
+
+# ------------------------------------------------------------------
+# User Settings (Telegram / Export / Notifications)
+# ------------------------------------------------------------------
+@app.route("/api/user/settings", methods=["GET"])
+@jwt_required()
+def api_user_settings_get():
+    """Get current user settings (Telegram, report schedule, alerts)."""
+    user_id = get_jwt_identity()
+    row = execute_one("""
+        SELECT telegram_bot_token, telegram_chat_id, report_schedule, option_alert_days, base_currency
+        FROM user_profiles WHERE user_id = %s
+    """, (user_id,))
+    if not row:
+        return jsonify({
+            "telegram_bot_token": "",
+            "telegram_chat_id": "",
+            "report_schedule": "none",
+            "option_alert_days": [7, 3, 1],
+            "base_currency": "USD"
+        })
+    return jsonify({
+        "telegram_bot_token": row.get("telegram_bot_token") or "",
+        "telegram_chat_id": row.get("telegram_chat_id") or "",
+        "report_schedule": row.get("report_schedule") or "none",
+        "option_alert_days": row.get("option_alert_days") or [7, 3, 1],
+        "base_currency": row.get("base_currency") or "USD"
+    })
+
+
+@app.route("/api/user/settings", methods=["POST"])
+@jwt_required()
+def api_user_settings_save():
+    """Save user settings."""
+    user_id = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    bot_token = data.get("telegram_bot_token", "").strip()
+    chat_id = data.get("telegram_chat_id", "").strip()
+    report_schedule = data.get("report_schedule", "none")
+    option_alert_days = data.get("option_alert_days", [7, 3, 1])
+
+    # Validate report_schedule
+    if report_schedule not in ("none", "weekly", "monthly"):
+        report_schedule = "none"
+
+    execute("""
+        UPDATE user_profiles
+        SET telegram_bot_token = %s,
+            telegram_chat_id = %s,
+            report_schedule = %s,
+            option_alert_days = %s::jsonb,
+            updated_at = NOW()
+        WHERE user_id = %s
+    """, (bot_token or None, chat_id or None, report_schedule, json.dumps(option_alert_days), user_id))
+    return jsonify({"success": True})
+
+
+@app.route("/api/user/test-telegram", methods=["POST"])
+@jwt_required()
+def api_user_test_telegram():
+    """Send a test message to the user's Telegram."""
+    user_id = get_jwt_identity()
+    row = execute_one("""
+        SELECT telegram_bot_token, telegram_chat_id
+        FROM user_profiles WHERE user_id = %s
+    """, (user_id,))
+    if not row or not row.get("telegram_bot_token") or not row.get("telegram_chat_id"):
+        return jsonify({"error": "请先配置 Telegram Bot Token 和 Chat ID"}), 400
+    try:
+        send_telegram_message(
+            row["telegram_bot_token"],
+            row["telegram_chat_id"],
+            "🧪 <b>IB Dashboard 测试消息</b>\n\n您的 Telegram 通知已配置成功！"
+        )
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ------------------------------------------------------------------
@@ -1903,6 +1982,80 @@ def api_share_dashboard_slice(token, alias, slice_name):
     resp = jsonify(_slice_payload(payload, slice_name))
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return resp
+
+
+# ------------------------------------------------------------------
+# User Data Export
+# ------------------------------------------------------------------
+@app.route("/api/user/export/<data_type>", methods=["GET"])
+@jwt_required()
+def api_user_export(data_type):
+    """Export user data as CSV. data_type: trades, dividends, positions, nav."""
+    user_id = get_jwt_identity()
+    account_id = request.args.get("account_id", "combined")
+    target_user = _resolve_preview_user_id(user_id)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    if data_type == "trades":
+        writer.writerow(["date", "symbol", "buy_sell", "quantity", "trade_price", "proceeds", "currency", "account_id"])
+        rows = execute("""
+            SELECT trade_date, symbol, buy_sell, quantity, trade_price, proceeds, currency, account_id
+            FROM archive_trade
+            WHERE user_id = %s AND (%s = 'combined' OR account_id = %s)
+            ORDER BY trade_date DESC
+        """, (target_user, account_id, account_id))
+        for r in rows:
+            writer.writerow([r["trade_date"], r["symbol"], r["buy_sell"], r["quantity"],
+                             r["trade_price"], r["proceeds"], r["currency"], r["account_id"]])
+        filename = f"trades_{account_id}.csv"
+
+    elif data_type == "dividends":
+        writer.writerow(["date", "symbol", "amount", "currency", "account_id"])
+        rows = execute("""
+            SELECT date, symbol, amount, currency, account_id
+            FROM archive_dividend
+            WHERE user_id = %s AND (%s = 'combined' OR account_id = %s)
+            ORDER BY date DESC
+        """, (target_user, account_id, account_id))
+        for r in rows:
+            writer.writerow([r["date"], r["symbol"], r["amount"], r["currency"], r["account_id"]])
+        filename = f"dividends_{account_id}.csv"
+
+    elif data_type == "positions":
+        writer.writerow(["date", "symbol", "quantity", "position_value", "cost_basis", "unrealized_pnl", "currency", "account_id"])
+        rows = execute("""
+            SELECT date, symbol, quantity, position_value, cost_basis, unrealized_pnl, currency, account_id
+            FROM positions
+            WHERE user_id = %s AND (%s = 'combined' OR account_id = %s)
+            ORDER BY date DESC, position_value DESC
+        """, (target_user, account_id, account_id))
+        for r in rows:
+            writer.writerow([r["date"], r["symbol"], r["quantity"], r["position_value"],
+                             r["cost_basis"], r["unrealized_pnl"], r["currency"], r["account_id"]])
+        filename = f"positions_{account_id}.csv"
+
+    elif data_type == "nav":
+        writer.writerow(["date", "ending_value", "total_gain", "total_gain_pct", "account_id"])
+        rows = execute("""
+            SELECT date, ending_value, total_gain, total_gain_pct, account_id
+            FROM daily_nav
+            WHERE user_id = %s AND (%s = 'combined' OR account_id = %s)
+            ORDER BY date DESC
+        """, (target_user, account_id, account_id))
+        for r in rows:
+            writer.writerow([r["date"], r["ending_value"], r["total_gain"], r["total_gain_pct"], r["account_id"]])
+        filename = f"nav_{account_id}.csv"
+
+    else:
+        return jsonify({"error": "Unknown export type"}), 400
+
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 # Static files (React SPA catch-all)

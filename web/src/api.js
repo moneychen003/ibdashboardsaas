@@ -135,4 +135,10 @@ export const api = {
   getShareConfig: (token) => fetchJson(`/api/share/${token}`),
   shareDashboard: (token, alias) => fetchJson(`/api/share/${token}/dashboard/${alias}`),
   shareDashboardSlice: (token, alias, slice) => fetchJson(`/api/share/${token}/dashboard/${alias}/${slice}`),
+
+  // User settings (Telegram / export)
+  userSettingsGet: () => fetchJson('/api/user/settings'),
+  userSettingsSave: (data) => fetchJson('/api/user/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  userTestTelegram: () => fetchJson('/api/user/test-telegram', { method: 'POST' }),
+  userExportUrl: (type, accountId = 'combined') => `/api/user/export/${type}?account_id=${encodeURIComponent(accountId)}`,
 };

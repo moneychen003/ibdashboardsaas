@@ -15,7 +15,9 @@ from scripts.generate_dashboards import _write_json_and_cache
 import scripts.postgres_to_dashboard as pgdash
 from utils.crypto_token import decrypt_token
 from utils.quotas import enforce_history_retention, get_user_limits, check_account_limit
+from utils.telegram import send_telegram_message
 from rq import get_current_job
+from db.postgres_client import execute
 
 
 def import_xml_job(user_id: str, upload_id: str, file_path: str):
@@ -311,3 +313,171 @@ def flex_sync_job(user_id: str):
                     WHERE id = %s
                 ''', (msg, account_id, upload_id, log_id))
         return {"status": "failed", "error": msg, "upload_id": upload_id}
+
+
+# ------------------------------------------------------------------
+# Telegram Notifications
+# ------------------------------------------------------------------
+def send_option_alerts_job():
+    """Scan all users' options and send Telegram alerts for near-expiry positions."""
+    import json
+    from datetime import datetime, timedelta
+
+    users = execute("""
+        SELECT p.user_id, p.telegram_bot_token, p.telegram_chat_id, p.option_alert_days, p.base_currency
+        FROM user_profiles p
+        JOIN users u ON u.id = p.user_id
+        WHERE u.is_active = TRUE
+          AND p.telegram_bot_token IS NOT NULL
+          AND p.telegram_chat_id IS NOT NULL
+    """)
+
+    today = datetime.now().date()
+    for user in users:
+        user_id = user["user_id"]
+        bot_token = user["telegram_bot_token"]
+        chat_id = user["telegram_chat_id"]
+        alert_days = user.get("option_alert_days") or [7, 3, 1]
+        if isinstance(alert_days, str):
+            alert_days = json.loads(alert_days)
+        base_currency = user.get("base_currency") or "USD"
+
+        # Find option positions nearing expiry
+        rows = execute("""
+            SELECT symbol, quantity, strike, expiry, option_type, position_value, unrealized_pnl, account_id
+            FROM positions
+            WHERE user_id = %s
+              AND symbol LIKE '% %'
+              AND expiry IS NOT NULL
+              AND date = (SELECT MAX(date) FROM positions WHERE user_id = %s)
+            ORDER BY expiry ASC
+        """, (user_id, user_id))
+
+        alerts = []
+        for r in rows:
+            if not r["expiry"]:
+                continue
+            expiry_date = r["expiry"]
+            if isinstance(expiry_date, str):
+                expiry_date = datetime.strptime(expiry_date, "%Y-%m-%d").date()
+            elif hasattr(expiry_date, 'date'):
+                expiry_date = expiry_date.date()
+
+            days_to_expiry = (expiry_date - today).days
+            if days_to_expiry < 0:
+                continue
+            if days_to_expiry not in alert_days:
+                continue
+
+            # Check if we already sent this alert today
+            already_sent = execute_one("""
+                SELECT 1 FROM user_notification_logs
+                WHERE user_id = %s AND type = 'option_alert'
+                  AND payload->>'symbol' = %s
+                  AND payload->>'expiry' = %s
+                  AND sent_at > NOW() - INTERVAL '23 hours'
+            """, (user_id, r["symbol"], str(expiry_date)))
+            if already_sent:
+                continue
+
+            pnL_str = f"{r['unrealized_pnl']:+.2f}" if r["unrealized_pnl"] else "-"
+            alerts.append(
+                f"• <b>{r['symbol']}</b> ({r['option_type'] or 'OPT'})\n"
+                f"  到期: {expiry_date} (还有 {days_to_expiry} 天)\n"
+                f"  行权价: {r['strike'] or '-'}  数量: {r['quantity']}  盈亏: {pnL_str}"
+            )
+
+            # Log that we sent it
+            with get_cursor() as cur:
+                cur.execute("""
+                    INSERT INTO user_notification_logs (user_id, type, payload)
+                    VALUES (%s, 'option_alert', %s)
+                """, (user_id, json.dumps({"symbol": r["symbol"], "expiry": str(expiry_date), "days": days_to_expiry})))
+
+        if alerts:
+            msg = (
+                f"⏰ <b>期权到期提醒</b>\n\n"
+                f"{'\n\n'.join(alerts)}\n\n"
+                f"请及时关注到期风险。"
+            )
+            try:
+                send_telegram_message(bot_token, chat_id, msg)
+            except Exception as e:
+                print(f"[option_alert] Failed to send to {user_id}: {e}")
+
+
+def send_report_job(user_id: str, report_type: str = "weekly"):
+    """Generate and send a portfolio summary report via Telegram."""
+    import json
+    from datetime import datetime, timedelta
+    import scripts.postgres_to_dashboard as pgdash
+
+    user = execute_one("""
+        SELECT p.telegram_bot_token, p.telegram_chat_id, p.base_currency
+        FROM user_profiles p
+        JOIN users u ON u.id = p.user_id
+        WHERE p.user_id = %s AND u.is_active = TRUE
+    """, (user_id,))
+    if not user or not user.get("telegram_bot_token") or not user.get("telegram_chat_id"):
+        return {"status": "skipped", "reason": "no telegram config"}
+
+    bot_token = user["telegram_bot_token"]
+    chat_id = user["telegram_chat_id"]
+    base_currency = user.get("base_currency") or "USD"
+
+    # Generate dashboard data
+    try:
+        data = pgdash.generate_dashboard_data(user_id, "combined")
+    except Exception as e:
+        return {"status": "failed", "error": f"dashboard generation failed: {e}"}
+
+    if not data:
+        return {"status": "failed", "error": "no data"}
+
+    summary = data.get("summary", {})
+    total_value = summary.get("totalValue") or summary.get("endingValue") or 0
+    total_gain = summary.get("totalGain", 0)
+    total_gain_pct = summary.get("totalGainPct", 0)
+
+    # Recent 7-day P&L
+    history = data.get("history", [])
+    recent_change = 0
+    if len(history) >= 2:
+        recent_change = history[-1].get("endingValue", 0) - history[-2].get("endingValue", 0)
+
+    # Top positions
+    positions = data.get("openPositions", [])
+    top_positions = sorted(positions, key=lambda x: abs(x.get("positionValue", 0)), reverse=True)[:5]
+    pos_lines = []
+    for p in top_positions:
+        pos_lines.append(f"• {p.get('symbol', '-')}: {p.get('positionValue', 0):,.0f}")
+
+    if report_type == "weekly":
+        title = "📊 <b>周报</b>"
+    else:
+        title = "📊 <b>月报</b>"
+
+    prefix = "¥" if base_currency == "CNH" else "$"
+    gain_emoji = "🟢" if total_gain >= 0 else "🔴"
+    recent_emoji = "🟢" if recent_change >= 0 else "🔴"
+
+    msg = (
+        f"{title}\n"
+        f"截止 {datetime.now().strftime('%Y-%m-%d')}\n\n"
+        f"<b>总资产:</b> {prefix}{total_value:,.2f}\n"
+        f"<b>总盈亏:</b> {gain_emoji} {prefix}{total_gain:,.2f} ({total_gain_pct:+.2%})\n"
+        f"<b>近7日:</b> {recent_emoji} {prefix}{recent_change:,.2f}\n\n"
+        f"<b>Top 持仓</b>\n"
+        f"{'\n'.join(pos_lines)}"
+    )
+
+    try:
+        send_telegram_message(bot_token, chat_id, msg)
+        with get_cursor() as cur:
+            cur.execute("""
+                INSERT INTO user_notification_logs (user_id, type, payload)
+                VALUES (%s, %s, %s)
+            """, (user_id, f"{report_type}_report", json.dumps({"total_value": float(total_value), "total_gain": float(total_gain)})))
+        return {"status": "sent"}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}

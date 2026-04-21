@@ -214,7 +214,7 @@ export default function Layout({ children }) {
             )}
           </div>
 
-          <div className="flex items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-1 md:gap-2 md:overflow-visible md:py-0">
+          <div className="hidden sm:flex items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-1 md:gap-2 md:overflow-visible md:py-0">
             {tabs.map((t) => (
               <button
                 key={t.id}
@@ -224,8 +224,7 @@ export default function Layout({ children }) {
                   activeTab === t.id ? 'bg-[var(--lighter-gray)] text-black' : 'text-[var(--gray)] hover:bg-[var(--lighter-gray)] hover:text-black'
                 )}
               >
-                <span className="hidden sm:inline">{t.label}</span>
-                <span className="sm:hidden">{t.text}</span>
+                {t.label}
               </button>
             ))}
           </div>
@@ -386,8 +385,36 @@ export default function Layout({ children }) {
         <CommunityModal visible={modalOpen} onClose={() => setModalOpen(false)} />
       )}
 
-      <main className="mx-auto max-w-[1400px] px-3 py-6 md:px-6 md:py-10">{children}</main>
+      <main className="mx-auto max-w-[1400px] px-3 py-6 pb-24 md:px-6 md:py-10 md:pb-10">{children}</main>
       <SettingsPanel />
+
+      {/* Mobile Bottom Tab Bar */}
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-[var(--light-gray)] bg-white/95 backdrop-blur sm:hidden">
+        <div className="mx-auto flex h-14 max-w-[1400px] items-center justify-around px-2">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => navigateToTab(t.id)}
+              className="flex flex-1 flex-col items-center justify-center gap-0.5 py-1"
+            >
+              <span
+                className={classNames(
+                  'h-1 w-1 rounded-full transition',
+                  activeTab === t.id ? 'bg-black' : 'bg-transparent'
+                )}
+              />
+              <span
+                className={classNames(
+                  'text-[11px] font-medium leading-tight transition',
+                  activeTab === t.id ? 'text-black' : 'text-[var(--gray)]'
+                )}
+              >
+                {t.text}
+              </span>
+            </button>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

@@ -721,3 +721,21 @@ CREATE TABLE IF NOT EXISTS share_links (
 );
 CREATE INDEX idx_share_links_token ON share_links(token);
 CREATE INDEX idx_share_links_user ON share_links(user_id, created_at DESC);
+
+-- ------------------------------------------------------------------
+-- User Notifications (Telegram)
+-- ------------------------------------------------------------------
+ALTER TABLE user_profiles
+    ADD COLUMN IF NOT EXISTS telegram_bot_token TEXT,
+    ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT,
+    ADD COLUMN IF NOT EXISTS report_schedule TEXT DEFAULT 'none',
+    ADD COLUMN IF NOT EXISTS option_alert_days JSONB DEFAULT '[7,3,1]';
+
+CREATE TABLE IF NOT EXISTS user_notification_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL, -- 'option_alert', 'weekly_report', 'monthly_report'
+    payload JSONB,
+    sent_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_notif_logs_user_type ON user_notification_logs(user_id, type, sent_at);

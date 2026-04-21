@@ -6,6 +6,7 @@ const TABS = [
   { id: 'status', label: '系统状态' },
   { id: 'upload', label: '导入数据' },
   { id: 'share', label: '分享面板' },
+  { id: 'notifications', label: '通知与导出' },
   { id: 'ops', label: '数据运维' },
   { id: 'backups', label: '备份恢复' },
   { id: 'accounts', label: '账户与货币' },
@@ -88,6 +89,7 @@ export default function SettingsPanel() {
           {activeTab === 'status' && <StatusTab />}
           {activeTab === 'upload' && <UploadTab />}
           {activeTab === 'share' && <ShareTab />}
+          {activeTab === 'notifications' && <NotificationsTab />}
           {activeTab === 'ops' && <OpsTab />}
           {activeTab === 'backups' && <BackupsTab />}
           {activeTab === 'accounts' && <AccountsTab />}
@@ -1278,6 +1280,216 @@ function ShareTab() {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+// ---------- Notifications & Export Tab ----------
+function NotificationsTab() {
+  const [settings, setSettings] = useState({
+    telegram_bot_token: '',
+    telegram_chat_id: '',
+    report_schedule: 'none',
+    option_alert_days: [7, 3, 1],
+  });
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const accounts = useDashboardStore((s) => s.accounts);
+
+  useEffect(() => {
+    setLoading(true);
+    api.userSettingsGet()
+      .then((data) => {
+        setSettings({
+          telegram_bot_token: data.telegram_bot_token || '',
+          telegram_chat_id: data.telegram_chat_id || '',
+          report_schedule: data.report_schedule || 'none',
+          option_alert_days: data.option_alert_days || [7, 3, 1],
+        });
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.userSettingsSave({
+        telegram_bot_token: settings.telegram_bot_token,
+        telegram_chat_id: settings.telegram_chat_id,
+        report_schedule: settings.report_schedule,
+        option_alert_days: settings.option_alert_days,
+      });
+      alert('保存成功');
+    } catch (e) {
+      alert('保存失败: ' + (e.message || '未知错误'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      await api.userTestTelegram();
+      alert('测试消息已发送，请检查 Telegram');
+    } catch (e) {
+      alert('发送失败: ' + (e.message || '未知错误'));
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const toggleAlertDay = (day) => {
+    setSettings((prev) => {
+      const has = prev.option_alert_days.includes(day);
+      return {
+        ...prev,
+        option_alert_days: has
+          ? prev.option_alert_days.filter((d) => d !== day)
+          : [...prev.option_alert_days, day].sort((a, b) => a - b),
+      };
+    });
+  };
+
+  const currentAccount = accounts.find((a) => a.alias !== 'combined')?.alias || 'combined';
+
+  return (
+    <div className="space-y-5">
+      {/* Telegram Settings */}
+      <div className="rounded-lg border border-[var(--light-gray)] p-4">
+        <div className="mb-3 text-sm font-semibold">Telegram 通知</div>
+        {loading ? (
+          <div className="text-sm text-[var(--gray)]">加载中...</div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <div className="mb-1 text-xs text-[var(--gray)]">Bot Token</div>
+              <input
+                type="text"
+                value={settings.telegram_bot_token}
+                onChange={(e) => setSettings((p) => ({ ...p, telegram_bot_token: e.target.value }))}
+                placeholder="123456789:ABCdef..."
+                className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
+              />
+              <div className="mt-1 text-xs text-[var(--gray)]">
+                在 Telegram @BotFather 创建 Bot 后获取
+              </div>
+            </div>
+            <div>
+              <div className="mb-1 text-xs text-[var(--gray)]">Chat ID</div>
+              <input
+                type="text"
+                value={settings.telegram_chat_id}
+                onChange={(e) => setSettings((p) => ({ ...p, telegram_chat_id: e.target.value }))}
+                placeholder="例如: 123456789"
+                className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
+              />
+              <div className="mt-1 text-xs text-[var(--gray)]">
+                给 Bot 发送任意消息后，访问 https://api.telegram.org/bot&lt;Token&gt;/getUpdates 获取 chat id
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {saving ? '保存中...' : '保存'}
+              </button>
+              <button
+                onClick={handleTest}
+                disabled={testing || !settings.telegram_bot_token || !settings.telegram_chat_id}
+                className="rounded-lg border border-[var(--light-gray)] px-3 py-2 text-sm hover:border-black disabled:opacity-50"
+              >
+                {testing ? '发送中...' : '发送测试消息'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Report Schedule */}
+      <div className="rounded-lg border border-[var(--light-gray)] p-4">
+        <div className="mb-3 text-sm font-semibold">定期报告</div>
+        <div className="mb-3">
+          <div className="mb-1 text-xs text-[var(--gray)]">推送频率</div>
+          <select
+            value={settings.report_schedule}
+            onChange={(e) => setSettings((p) => ({ ...p, report_schedule: e.target.value }))}
+            className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
+          >
+            <option value="none">关闭</option>
+            <option value="weekly">每周</option>
+            <option value="monthly">每月</option>
+          </select>
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {saving ? '保存中...' : '保存'}
+        </button>
+      </div>
+
+      {/* Option Alerts */}
+      <div className="rounded-lg border border-[var(--light-gray)] p-4">
+        <div className="mb-3 text-sm font-semibold">期权到期提醒</div>
+        <div className="mb-3">
+          <div className="mb-1 text-xs text-[var(--gray)]">提前几天提醒（可多选）</div>
+          <div className="flex flex-wrap gap-2">
+            {[1, 3, 7, 14, 30].map((day) => (
+              <label
+                key={day}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm ${
+                  settings.option_alert_days.includes(day)
+                    ? 'border-black bg-black text-white'
+                    : 'border-[var(--light-gray)] hover:bg-[var(--lighter-gray)]'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={settings.option_alert_days.includes(day)}
+                  onChange={() => toggleAlertDay(day)}
+                  className="hidden"
+                />
+                {day} 天
+              </label>
+            ))}
+          </div>
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {saving ? '保存中...' : '保存'}
+        </button>
+      </div>
+
+      {/* Data Export */}
+      <div className="rounded-lg border border-[var(--light-gray)] p-4">
+        <div className="mb-3 text-sm font-semibold">数据导出 (CSV)</div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {[
+            { key: 'trades', label: '📈 交易记录' },
+            { key: 'dividends', label: '💰 股息记录' },
+            { key: 'positions', label: '💼 持仓明细' },
+            { key: 'nav', label: '📊 净值历史' },
+          ].map((item) => (
+            <a
+              key={item.key}
+              href={api.userExportUrl(item.key, currentAccount)}
+              className="rounded-lg border border-[var(--light-gray)] px-3 py-2 text-center text-sm hover:border-black hover:bg-black hover:text-white"
+            >
+              {item.label}
+            </a>
+          ))}
+        </div>
       </div>
     </div>
   );
