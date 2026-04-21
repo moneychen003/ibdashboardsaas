@@ -430,7 +430,7 @@ export default function AdminPage() {
                       <td className="py-2">
                         <div className="flex flex-wrap gap-1">
                           <button onClick={() => openAccountStats(a)} className="rounded border px-2 py-1 text-xs hover:bg-black hover:text-white">统计</button>
-                          <a href={`/?admin_preview_user=${a.user_id}&admin_preview_account=${a.account_id}`} target="_blank" className="inline-block rounded border px-2 py-1 text-xs hover:bg-black hover:text-white">Dashboard</a>
+                          <a href={`/${a.account_id}/overview?admin_preview_user=${a.user_id}&admin_preview_account=${a.account_id}`} target="_blank" className="inline-block rounded border px-2 py-1 text-xs hover:bg-black hover:text-white">Dashboard</a>
                         </div>
                       </td>
                     </tr>
@@ -701,7 +701,7 @@ export default function AdminPage() {
               <Metric label="导入总行数" value={accountStats.uploads?.total_rows} />
             </div>
             <div className="flex flex-wrap gap-2">
-              <a href={`/?admin_preview_user=${statsAccount.user_id}&admin_preview_account=${statsAccount.account_id}`} target="_blank" className="inline-block rounded-lg bg-black px-4 py-2 text-sm text-white hover:bg-gray-800">查看 Dashboard</a>
+              <a href={`/${statsAccount.account_id}/overview?admin_preview_user=${statsAccount.user_id}&admin_preview_account=${statsAccount.account_id}`} target="_blank" className="inline-block rounded-lg bg-black px-4 py-2 text-sm text-white hover:bg-gray-800">查看 Dashboard</a>
               <a href={api.adminExportDashboard(statsAccount.user_id, statsAccount.account_id, 'csv')} target="_blank" className="inline-block rounded-lg border px-4 py-2 text-sm hover:bg-black hover:text-white">导出 CSV</a>
               <a href={api.adminExportDashboard(statsAccount.user_id, statsAccount.account_id, 'json')} target="_blank" className="inline-block rounded-lg border px-4 py-2 text-sm hover:bg-black hover:text-white">导出 JSON</a>
             </div>

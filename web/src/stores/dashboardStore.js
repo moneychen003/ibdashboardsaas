@@ -160,6 +160,15 @@ export const useDashboardStore = create((set, get) => ({
 
   loadAccounts: async () => {
     const { accounts } = await api.accounts(get()._adminParams());
+    
+    // 检查 URL 中的 Admin 预览参数，优先使用
+    const urlParams = new URLSearchParams(window.location.search);
+    const previewAccount = urlParams.get('admin_preview_account');
+    if (previewAccount) {
+      set({ accounts, currentAccount: previewAccount });
+      return;
+    }
+
     set({ accounts });
     const current = get().currentAccount;
     // Only default to combined if no account is currently selected
@@ -175,8 +184,8 @@ export const useDashboardStore = create((set, get) => ({
   },
 
   _adminParams: () => {
-    const isAdmin = get().auth?.is_admin;
-    if (!isAdmin) return '';
+    // 直接检查 URL 参数，不再依赖本地 auth 状态（因为 SPA 初始化时 auth 可能还没加载完）
+    // 鉴权逻辑在后端 _resolve_preview_user_id 中处理
     const params = new URLSearchParams(window.location.search);
     const previewUser = params.get('admin_preview_user');
     if (previewUser) {
