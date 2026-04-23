@@ -395,9 +395,10 @@ def send_option_alerts_job():
                 """, (user_id, json.dumps({"symbol": r["symbol"], "expiry": str(expiry_date), "days": days_to_expiry})))
 
         if alerts:
+            alerts_text = '\n\n'.join(alerts)
             msg = (
                 f"⏰ <b>期权到期提醒</b>\n\n"
-                f"{'\n\n'.join(alerts)}\n\n"
+                f"{alerts_text}\n\n"
                 f"请及时关注到期风险。"
             )
             try:
@@ -461,6 +462,7 @@ def send_report_job(user_id: str, report_type: str = "weekly"):
     gain_emoji = "🟢" if total_gain >= 0 else "🔴"
     recent_emoji = "🟢" if recent_change >= 0 else "🔴"
 
+    pos_text = '\n'.join(pos_lines)
     msg = (
         f"{title}\n"
         f"截止 {datetime.now().strftime('%Y-%m-%d')}\n\n"
@@ -468,7 +470,7 @@ def send_report_job(user_id: str, report_type: str = "weekly"):
         f"<b>总盈亏:</b> {gain_emoji} {prefix}{total_gain:,.2f} ({total_gain_pct:+.2%})\n"
         f"<b>近7日:</b> {recent_emoji} {prefix}{recent_change:,.2f}\n\n"
         f"<b>Top 持仓</b>\n"
-        f"{'\n'.join(pos_lines)}"
+        f"{pos_text}"
     )
 
     try:

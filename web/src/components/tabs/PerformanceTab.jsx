@@ -233,15 +233,23 @@ function BenchmarkSummary({ data }) {
     return ((lastPrice / firstPrice) - 1) * 100;
   }
 
-  const qqqTotal = getBenchmarkTotal('QQQ');
-  const spTotal = getBenchmarkTotal('SP500');
+  const BENCHMARK_COLORS = ['#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
+  const BENCHMARK_LABELS = { 'SP500': '标普500', 'HSI': '恒生指数', 'CSI300': '沪深300', 'N225': '日经225', 'STI': '海峡指数', 'NASDAQ': '纳斯达克' };
 
-  const qqqMap = {};
-  const spMap = {};
-  const qqqFirst = data.benchmarks?.QQQ?.find((r) => r.date <= labels[0])?.price || data.benchmarks?.QQQ?.[0]?.price;
-  const spFirst = data.benchmarks?.SP500?.find((r) => r.date <= labels[0])?.price || data.benchmarks?.SP500?.[0]?.price;
-  (data.benchmarks?.QQQ || []).forEach((r) => (qqqMap[r.date] = r.price));
-  (data.benchmarks?.SP500 || []).forEach((r) => (spMap[r.date] = r.price));
+  const benchmarkKeys = Object.keys(data.benchmarks || {}).filter((k) => k !== 'accountId');
+  const benchmarkTotals = {};
+  const benchmarkMaps = {};
+  const benchmarkFirsts = {};
+
+  benchmarkKeys.forEach((key) => {
+    benchmarkTotals[key] = getBenchmarkTotal(key);
+    const bmData = data.benchmarks[key];
+    const first = bmData?.find((r) => r.date <= labels[0])?.price || bmData?.[0]?.price;
+    benchmarkFirsts[key] = first;
+    const map = {};
+    (bmData || []).forEach((r) => (map[r.date] = r.price));
+    benchmarkMaps[key] = map;
+  });
 
   const echartsSeries = [
     {
@@ -256,31 +264,22 @@ function BenchmarkSummary({ data }) {
     },
   ];
 
-  if (qqqTotal != null) {
+  benchmarkKeys.forEach((key, idx) => {
+    if (benchmarkTotals[key] == null) return;
+    const color = BENCHMARK_COLORS[idx % BENCHMARK_COLORS.length];
+    const map = benchmarkMaps[key];
+    const first = benchmarkFirsts[key];
     echartsSeries.push({
-      name: 'QQQ',
+      name: BENCHMARK_LABELS[key] || key,
       type: 'line',
-      data: labels.map((d) => { const p = qqqMap[d]; return qqqFirst && p != null ? ((p / qqqFirst) - 1) * 100 : null; }),
+      data: labels.map((d) => { const p = map[d]; return first && p != null ? ((p / first) - 1) * 100 : null; }),
       smooth: true,
       showSymbol: false,
       connectNulls: true,
-      lineStyle: { color: '#6366f1', width: 2, type: 'dashed' },
+      lineStyle: { color, width: 2, type: 'dashed' },
       z: 5,
     });
-  }
-
-  if (spTotal != null) {
-    echartsSeries.push({
-      name: '标普500',
-      type: 'line',
-      data: labels.map((d) => { const p = spMap[d]; return spFirst && p != null ? ((p / spFirst) - 1) * 100 : null; }),
-      smooth: true,
-      showSymbol: false,
-      connectNulls: true,
-      lineStyle: { color: '#ef4444', width: 2, type: 'dashed' },
-      z: 5,
-    });
-  }
+  });
 
   const option = {
     tooltip: {
@@ -314,13 +313,32 @@ function BenchmarkSummary({ data }) {
     series: echartsSeries,
   };
 
+  // Build stat cards dynamically
+  const statCards = [
+    <Stat key="me" label="我的账户" value={(myTotal >= 0 ? '+' : '') + fmtNum(myTotal, 2) + '%'} colorClass={myTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
+  ];
+  const firstBmKey = benchmarkKeys.find((k) => benchmarkTotals[k] != null);
+  benchmarkKeys.forEach((key) => {
+    if (benchmarkTotals[key] == null) return;
+    const label = BENCHMARK_LABELS[key] || key;
+    statCards.push(
+      <Stat key={key} label={label} value={(benchmarkTotals[key] >= 0 ? '+' : '') + fmtNum(benchmarkTotals[key], 2) + '%'} colorClass={benchmarkTotals[key] >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
+    );
+  });
+  if (firstBmKey && benchmarkTotals[firstBmKey] != null) {
+    const diff = myTotal - benchmarkTotals[firstBmKey];
+    statCards.push(
+      <Stat key="excess" label={`相对 ${BENCHMARK_LABELS[firstBmKey] || firstBmKey} 超额`} value={(diff >= 0 ? '+' : '') + fmtNum(diff, 2) + '%'} colorClass={diff >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
+    );
+  }
+
+  const cols = statCards.length <= 2 ? 2 : statCards.length <= 4 ? 4 : Math.min(statCards.length, 6);
+  const gridClass = `grid-cols-2 gap-3 sm:grid-cols-${Math.min(cols, 4)}`;
+
   return (
     <Card title="基准收益对比">
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="我的账户" value={(myTotal >= 0 ? '+' : '') + fmtNum(myTotal, 2) + '%'} colorClass={myTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
-        <Stat label="QQQ" value={qqqTotal != null ? (qqqTotal >= 0 ? '+' : '') + fmtNum(qqqTotal, 2) + '%' : '--'} colorClass={qqqTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
-        <Stat label="标普500" value={spTotal != null ? (spTotal >= 0 ? '+' : '') + fmtNum(spTotal, 2) + '%' : '--'} colorClass={spTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
-        <Stat label="相对 QQQ 超额" value={qqqTotal != null ? (myTotal - qqqTotal >= 0 ? '+' : '') + fmtNum(myTotal - qqqTotal, 2) + '%' : '--'} colorClass={qqqTotal != null && myTotal - qqqTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
+      <div className={`mb-4 grid ${gridClass}`}>
+        {statCards}
       </div>
       <div className="chart-container" style={{ height: 220 }}>
         <ECharts option={option} style={{ height: 220 }} />

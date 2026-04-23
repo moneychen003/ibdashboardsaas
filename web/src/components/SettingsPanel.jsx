@@ -1491,6 +1491,111 @@ function NotificationsTab() {
           ))}
         </div>
       </div>
+
+      <BenchmarkManager />
+    </div>
+  );
+}
+
+function BenchmarkManager() {
+  const [benchmarks, setBenchmarks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newTicker, setNewTicker] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    api.userBenchmarksGet()
+      .then((data) => setBenchmarks(data.benchmarks || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.userBenchmarksSave({ benchmarks });
+      alert('保存成功');
+    } catch (e) {
+      alert('保存失败: ' + (e.message || '未知错误'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAdd = () => {
+    if (!newName.trim() || !newTicker.trim()) return;
+    setBenchmarks((prev) => [...prev, { name: newName.trim(), ticker: newTicker.trim().toUpperCase() }]);
+    setNewName('');
+    setNewTicker('');
+  };
+
+  const handleRemove = (idx) => {
+    setBenchmarks((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <div className="rounded-lg border border-[var(--light-gray)] p-4">
+      <div className="mb-3 text-sm font-semibold">自定义 Benchmark</div>
+      <div className="mb-2 text-xs text-[var(--gray)]">
+        添加自定义指数或股票作为业绩对比基准（通过 Yahoo Finance 获取数据）
+      </div>
+      {loading ? (
+        <div className="text-sm text-[var(--gray)]">加载中...</div>
+      ) : (
+        <div className="space-y-3">
+          {benchmarks.length > 0 && (
+            <div className="space-y-2">
+              {benchmarks.map((bm, i) => (
+                <div key={i} className="flex items-center justify-between rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm">
+                  <div>
+                    <span className="font-medium">{bm.name}</span>
+                    <span className="ml-2 text-xs text-[var(--gray)]">{bm.ticker}</span>
+                  </div>
+                  <button onClick={() => handleRemove(i)} className="text-xs text-red-500 hover:text-red-700">删除</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="名称 (如: 比特币)"
+              className="flex-1 rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
+            />
+            <input
+              type="text"
+              value={newTicker}
+              onChange={(e) => setNewTicker(e.target.value)}
+              placeholder="Yahoo Ticker (如: BTC-USD)"
+              className="flex-1 rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
+            />
+            <button
+              onClick={handleAdd}
+              disabled={!newName.trim() || !newTicker.trim()}
+              className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              添加
+            </button>
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {saving ? '保存中...' : '保存 Benchmark'}
+          </button>
+
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            💡 常用 Ticker: 沪深300 (000300.SS), 比特币 (BTC-USD), 黄金 (GC=F), 原油 (CL=F)
+          </div>
+        </div>
+      )}
     </div>
   );
 }

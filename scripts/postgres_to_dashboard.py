@@ -14,10 +14,11 @@ from decimal import Decimal
 from datetime import date, datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from db.postgres_client import get_cursor
+from db.postgres_client import get_cursor, execute_one
 
 # 旧版 dashboard 生成器（SQLite）
 from scripts import sqlite_to_dashboard
+from scripts.sqlite_to_dashboard import fetch_yahoo_prices
 
 
 def _convert_value(v):
@@ -156,6 +157,32 @@ def _sync_account_to_temp_sqlite(user_id: str, account_id: str, is_combined: boo
     return conn_sql
 
 
+def _get_custom_benchmarks(user_id: str, start_date: str, end_date: str):
+    """Fetch user-defined benchmarks from user_profiles and Yahoo Finance."""
+    import json
+    row = execute_one("SELECT custom_benchmarks FROM user_profiles WHERE user_id = %s", (user_id,))
+    if not row or not row.get("custom_benchmarks"):
+        return {}
+    benchmarks = row["custom_benchmarks"]
+    if isinstance(benchmarks, str):
+        benchmarks = json.loads(benchmarks)
+    if not benchmarks:
+        return {}
+
+    result = {}
+    for bm in benchmarks:
+        name = bm.get("name")
+        ticker = bm.get("ticker")
+        if not name or not ticker:
+            continue
+        prices = fetch_yahoo_prices(ticker, start_date, end_date)
+        if prices:
+            arr = [{'date': d, 'price': round(p, 4)} for d, p in sorted(prices.items()) if p is not None]
+            if arr:
+                result[name] = arr
+    return result
+
+
 def generate_dashboard_data(user_id: str, account_id: str):
     """
     生成完整 Dashboard JSON。
@@ -178,6 +205,16 @@ def generate_dashboard_data(user_id: str, account_id: str):
             sys.stdout = old_stdout
     finally:
         conn.close()
+
+    # Merge custom benchmarks
+    if data and data.get("history"):
+        dates = [h["date"] for h in data["history"] if h.get("date")]
+        if dates:
+            start_date = min(dates)
+            end_date = max(dates)
+            custom = _get_custom_benchmarks(user_id, start_date, end_date)
+            if custom:
+                data.setdefault("benchmarks", {}).update(custom)
     return data
 
 

@@ -141,4 +141,11 @@ export const api = {
   userSettingsSave: (data) => fetchJson('/api/user/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   userTestTelegram: () => fetchJson('/api/user/test-telegram', { method: 'POST' }),
   userExportUrl: (type, accountId = 'combined') => `/api/user/export/${type}?account_id=${encodeURIComponent(accountId)}`,
+
+  // Search
+  search: (q) => fetchJson(`/api/search?q=${encodeURIComponent(q)}`),
+
+  // Benchmarks
+  userBenchmarksGet: () => fetchJson('/api/user/benchmarks'),
+  userBenchmarksSave: (data) => fetchJson('/api/user/benchmarks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
 };

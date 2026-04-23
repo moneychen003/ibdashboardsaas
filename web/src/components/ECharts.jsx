@@ -1,5 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
 
+function isDarkMode() {
+  return typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+}
+
+function injectDarkTheme(opt) {
+  if (!isDarkMode() || !opt) return opt;
+  const dark = {
+    backgroundColor: 'transparent',
+    textStyle: { color: '#aaa' },
+    legend: { textStyle: { color: '#aaa' } },
+    tooltip: { backgroundColor: 'rgba(20,20,20,0.95)', borderColor: '#444', textStyle: { color: '#eee' } },
+  };
+  const merge = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const out = { ...obj };
+    if (out.xAxis) {
+      [].concat(out.xAxis).forEach((ax) => {
+        if (ax) { ax.axisLine = { ...(ax.axisLine || {}), lineStyle: { ...(ax.axisLine?.lineStyle || {}), color: '#444' } }; ax.axisLabel = { ...(ax.axisLabel || {}), color: '#999' }; ax.splitLine = { ...(ax.splitLine || {}), lineStyle: { ...(ax.splitLine?.lineStyle || {}), color: '#222' } }; }
+      });
+    }
+    if (out.yAxis) {
+      [].concat(out.yAxis).forEach((ax) => {
+        if (ax) { ax.axisLine = { ...(ax.axisLine || {}), lineStyle: { ...(ax.axisLine?.lineStyle || {}), color: '#444' } }; ax.axisLabel = { ...(ax.axisLabel || {}), color: '#999' }; ax.splitLine = { ...(ax.splitLine || {}), lineStyle: { ...(ax.splitLine?.lineStyle || {}), color: '#222' } }; }
+      });
+    }
+    return out;
+  };
+  return merge({ ...dark, ...opt });
+}
+
 export default function ECharts({ option, style = {}, className = '' }) {
   const chartRef = useRef(null);
   const instanceRef = useRef(null);
@@ -35,7 +65,7 @@ export default function ECharts({ option, style = {}, className = '' }) {
         const handleResize = () => instanceRef.current && instanceRef.current.resize();
         window.addEventListener('resize', handleResize);
         if (option) {
-          instanceRef.current.setOption(option, true);
+          instanceRef.current.setOption(injectDarkTheme(option), true);
         }
       } catch (e) {
         setError(e.message);
@@ -58,7 +88,7 @@ export default function ECharts({ option, style = {}, className = '' }) {
   useEffect(() => {
     if (instanceRef.current && option) {
       try {
-        instanceRef.current.setOption(option, true);
+        instanceRef.current.setOption(injectDarkTheme(option), true);
       } catch (e) {
         setError(e.message);
       }

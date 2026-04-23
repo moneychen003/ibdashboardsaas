@@ -282,6 +282,52 @@ def api_accounts():
 
 
 # ------------------------------------------------------------------
+# Search
+# ------------------------------------------------------------------
+@app.route("/api/search", methods=["GET"])
+@jwt_required()
+def api_search():
+    """Search user's positions and trades by symbol."""
+    user_id = get_jwt_identity()
+    q = request.args.get("q", "").strip().upper()
+    if not q:
+        return jsonify({"results": []})
+
+    target_user = _resolve_preview_user_id(user_id)
+    like = f"%{q}%"
+
+    positions = execute("""
+        SELECT DISTINCT ON (symbol) symbol, quantity, position_value, unrealized_pnl, account_id
+        FROM positions
+        WHERE user_id = %s AND symbol ILIKE %s
+        ORDER BY symbol, date DESC
+        LIMIT 5
+    """, (target_user, like))
+
+    trades = execute("""
+        SELECT symbol, trade_date, buy_sell, quantity, trade_price, proceeds, account_id
+        FROM archive_trade
+        WHERE user_id = %s AND symbol ILIKE %s
+        ORDER BY trade_date DESC
+        LIMIT 5
+    """, (target_user, like))
+
+    return jsonify({
+        "positions": [
+            {"symbol": r["symbol"], "quantity": r["quantity"], "position_value": r["position_value"],
+             "unrealized_pnl": r["unrealized_pnl"], "account_id": r["account_id"]}
+            for r in positions
+        ],
+        "trades": [
+            {"symbol": r["symbol"], "trade_date": r["trade_date"], "buy_sell": r["buy_sell"],
+             "quantity": r["quantity"], "trade_price": r["trade_price"], "proceeds": r["proceeds"],
+             "account_id": r["account_id"]}
+            for r in trades
+        ]
+    })
+
+
+# ------------------------------------------------------------------
 # User Settings (Telegram / Export / Notifications)
 # ------------------------------------------------------------------
 @app.route("/api/user/settings", methods=["GET"])
@@ -334,6 +380,34 @@ def api_user_settings_save():
             updated_at = NOW()
         WHERE user_id = %s
     """, (bot_token or None, chat_id or None, report_schedule, json.dumps(option_alert_days), user_id))
+    return jsonify({"success": True})
+
+
+@app.route("/api/user/benchmarks", methods=["GET"])
+@jwt_required()
+def api_user_benchmarks_get():
+    """Get user's custom benchmarks."""
+    user_id = get_jwt_identity()
+    row = execute_one("SELECT custom_benchmarks FROM user_profiles WHERE user_id = %s", (user_id,))
+    benchmarks = row.get("custom_benchmarks") if row else []
+    if isinstance(benchmarks, str):
+        benchmarks = json.loads(benchmarks)
+    return jsonify({"benchmarks": benchmarks or []})
+
+
+@app.route("/api/user/benchmarks", methods=["POST"])
+@jwt_required()
+def api_user_benchmarks_save():
+    """Save user's custom benchmarks."""
+    user_id = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    benchmarks = data.get("benchmarks", [])
+    execute("""
+        UPDATE user_profiles
+        SET custom_benchmarks = %s::jsonb,
+            updated_at = NOW()
+        WHERE user_id = %s
+    """, (json.dumps(benchmarks), user_id))
     return jsonify({"success": True})
 
 
