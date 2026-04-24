@@ -80,11 +80,17 @@ def get_position_timeline(conn, account_id=None):
 
     for sym, d, qty, val, mark in cursor.fetchall():
         if sym in holdings:
+            qty_f = safe_float(qty)
+            val_f = safe_float(val)
+            mark_f = safe_float(mark)
+            # IB FlexQuery 2026-03 起可能丢 `position` 字段，用 positionValue / markPrice 回推 qty
+            if qty_f == 0 and val_f and mark_f:
+                qty_f = round(val_f / mark_f, 2)
             holdings[sym]['timeline'].append({
                 'date': d,
-                'quantity': safe_float(qty),
-                'value': safe_float(val),
-                'price': safe_float(mark),
+                'quantity': qty_f,
+                'value': val_f,
+                'price': mark_f,
                 'events': []
             })
 
@@ -401,7 +407,8 @@ def get_slb_income(conn, account_id=None):
             WHERE stmt_account_id = ? AND symbol = ?
             ORDER BY stmt_date DESC LIMIT 1
         ''', (account_id or '', sym))
-        coll = safe_float(cursor.fetchone()[0]) if account_id else 0
+        _row = cursor.fetchone()
+        coll = safe_float(_row[0]) if (account_id and _row) else 0
         by_symbol.append({
             'symbol': sym,
             'income': round(amt, 2),
@@ -711,7 +718,8 @@ def get_dividend_tracker(conn, account_id=None):
             WHERE stmt_account_id = ? AND symbol = ?
             ORDER BY stmt_date DESC LIMIT 1
         ''', (account_id or '', sym))
-        pv = safe_float(cursor.fetchone()[0]) if account_id else 0
+        _row2 = cursor.fetchone()
+        pv = safe_float(_row2[0]) if (account_id and _row2) else 0
         yields.append({
             'symbol': sym,
             'annualDividend': round(safe_float(ann), 2),

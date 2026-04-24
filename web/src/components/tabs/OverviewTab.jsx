@@ -119,6 +119,9 @@ export default function OverviewTab() {
     : (equitySeries.length
         ? convertCurrency(equitySeries[equitySeries.length - 1].value - equitySeries[0].value, displayCurrency, baseCurrency, fxRates)
         : 0);
+  const rangeNetFlow = rangeSummary.netFlow != null
+    ? convertCurrency(rangeSummary.netFlow, displayCurrency, baseCurrency, fxRates)
+    : null;
 
   return (
     <div className="space-y-8">
@@ -196,6 +199,11 @@ export default function OverviewTab() {
               : (RANGES.find((r) => r.key === currentNavRange)?.label || '全部时间')}
           </span>
         </div>
+        {rangeNetFlow && Math.abs(rangeNetFlow) > 0.01 && (
+          <div className="mt-1 text-xs text-white/50">
+            区间净入金 {(rangeNetFlow >= 0 ? '+' : '')}{fmtCur(rangeNetFlow, displayCurrency)}（已扣除）
+          </div>
+        )}
 
         {/* Mini chart */}
         <div className="mt-4 h-40 w-full lg:h-52">

@@ -188,8 +188,53 @@ def _fetch_yahoo_option_prices(option_symbols):
     return prices
 
 
+_YAHOO_SUFFIX_BY_CURRENCY = {
+    'EUR': '.F',   # Frankfurt (FWB)
+    'HKD': '.HK',  # Hong Kong
+    'JPY': '.T',   # Tokyo
+    'GBP': '.L',   # London
+    'AUD': '.AX',  # Australia
+    'CAD': '.TO',  # Toronto
+    'CHF': '.SW',  # Swiss
+    'SGD': '.SI',  # Singapore
+    'KRW': '.KS',  # Korea
+    'TWD': '.TW',  # Taiwan
+    'INR': '.NS',  # India NSE
+}
+
+
+def _build_yahoo_symbol_overrides(symbols):
+    """Map plain symbol → Yahoo ticker for non-USD instruments based on IB trade records.
+
+    Returns dict {plain_symbol: yahoo_symbol}. Symbols already in USD or unknown
+    currency are left out (caller falls back to the plain symbol).
+    """
+    overrides = {}
+    if not symbols:
+        return overrides
+    try:
+        rows = execute(
+            "SELECT DISTINCT symbol, currency FROM archive_trade "
+            "WHERE asset_category IN ('STK','ETF') AND symbol = ANY(%s) "
+            "AND currency IS NOT NULL AND currency != '' AND currency != 'USD'",
+            (list(symbols),),
+        )
+    except Exception as e:
+        print(f"[market] Yahoo override lookup failed: {e}")
+        return overrides
+    for r in rows:
+        sym = r.get("symbol")
+        curr = (r.get("currency") or "").upper()
+        suffix = _YAHOO_SUFFIX_BY_CURRENCY.get(curr)
+        if sym and suffix:
+            overrides[sym] = f"{sym}{suffix}"
+    return overrides
+
+
 def _fetch_yahoo_prices(symbols):
-    """使用 yfinance 获取股价，优先取盘后/盘前价，否则取常规收盘价。"""
+    """使用 yfinance 获取股价，优先取盘后/盘前价，否则取常规收盘价。
+    非美股（EUR/HKD/JPY/GBP/... ）按 IB 交易记录的 currency 自动加 Yahoo 后缀。
+    """
     prices = {}
     if not symbols:
         return prices
@@ -199,30 +244,38 @@ def _fetch_yahoo_prices(symbols):
         print("[market] yfinance not installed, skipping Yahoo fallback")
         return prices
 
+    # plain → yahoo；没有 override 的就用 plain 本身去查
+    overrides = _build_yahoo_symbol_overrides(symbols)
+    yahoo_of = lambda s: overrides.get(s, s)
+    plain_of = {yahoo_of(s): s for s in symbols}
+    fetch_syms = list(plain_of.keys())
+    if overrides:
+        print(f"[market] Yahoo non-US symbol overrides: {overrides}")
+
     # 1. 批量获取常规收盘价作为 fallback
     try:
         df = yf.download(
-            symbols,
+            fetch_syms,
             period="5d",
             interval="1d",
             group_by="ticker",
             progress=False,
             threads=True,
         )
-        if len(symbols) == 1:
-            sym = symbols[0]
+        if len(fetch_syms) == 1:
+            ysym = fetch_syms[0]
             try:
                 last = df["Close"].dropna().iloc[-1]
                 if float(last) > 0:
-                    prices[sym] = float(last)
+                    prices[plain_of[ysym]] = float(last)
             except Exception:
                 pass
         else:
-            for sym in symbols:
+            for ysym in fetch_syms:
                 try:
-                    last = df[sym]["Close"].dropna().iloc[-1]
+                    last = df[ysym]["Close"].dropna().iloc[-1]
                     if float(last) > 0:
-                        prices[sym] = float(last)
+                        prices[plain_of[ysym]] = float(last)
                 except Exception:
                     pass
     except Exception as e:
@@ -230,9 +283,9 @@ def _fetch_yahoo_prices(symbols):
 
     # 2. 逐个尝试获取盘后/盘前价并覆盖
     extended_count = 0
-    for sym in symbols:
+    for ysym in fetch_syms:
         try:
-            ticker = yf.Ticker(sym)
+            ticker = yf.Ticker(ysym)
             info = ticker.info
             ext_price = None
             if info.get("postMarketPrice"):
@@ -240,7 +293,7 @@ def _fetch_yahoo_prices(symbols):
             elif info.get("preMarketPrice"):
                 ext_price = float(info["preMarketPrice"])
             if ext_price and ext_price > 0:
-                prices[sym] = ext_price
+                prices[plain_of[ysym]] = ext_price
                 extended_count += 1
         except Exception:
             pass
@@ -508,7 +561,9 @@ def _regenerate_dashboards_for_user(user_id):
     """股价更新后自动重新生成 Dashboard JSON。"""
     import json
     import os
-    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+    # SaaS: market_data.py lives at project root (/opt/ib_dashboard/), so one dirname
+    # gives the project dir. Personal variant sits under scripts/ and still uses two.
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
     os.makedirs(data_dir, exist_ok=True)
     try:
         from scripts import postgres_to_dashboard as pgdash

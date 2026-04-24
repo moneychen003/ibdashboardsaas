@@ -121,13 +121,20 @@ def _sync_account_to_temp_sqlite(user_id: str, account_id: str, is_combined: boo
                     break
 
             # 构建 WHERE 条件
-            where_clauses = ["user_id = %s"]
-            params = [user_id]
+            # market_prices.symbol 是单列 PK，user_id 列会被最后一个 upsert 的用户覆盖，
+            # 按 user_id 过滤会导致某些 symbol 彻底丢给其他用户 —— 但价格本身是全局共享的。
+            # 这里跳过 user 过滤，让所有 symbol 的最新价都进 temp SQLite。
+            if table == 'market_prices':
+                where_clauses = []
+                params = []
+            else:
+                where_clauses = ["user_id = %s"]
+                params = [user_id]
             if account_col and not is_combined:
                 where_clauses.append(f"{account_col} = %s")
                 params.append(account_id)
 
-            where = " AND ".join(where_clauses)
+            where = " AND ".join(where_clauses) if where_clauses else "1=1"
             common_cols = [c for c in pg_cols if c != 'user_id']
             cols_str = ",".join(common_cols)
 
@@ -199,10 +206,12 @@ def generate_dashboard_data(user_id: str, account_id: str):
         import io
         old_stdout = sys.stdout
         sys.stdout = io.StringIO()
+        sqlite_to_dashboard.set_cost_basis_user_context(user_id)
         try:
             data = sqlite_to_dashboard.generate_dashboard_data(conn, pg_account, pg_label)
         finally:
             sys.stdout = old_stdout
+            sqlite_to_dashboard.set_cost_basis_user_context(None)
     finally:
         conn.close()
 

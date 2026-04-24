@@ -25,7 +25,7 @@ export const useDashboardStore = create((set, get) => ({
   // UI State
   currentCurrency: 'BASE',
   setCurrentCurrency: (c) => set({ currentCurrency: c }),
-  currentNavRange: 'navAll',
+  currentNavRange: 'nav1Year',
   setCurrentNavRange: (r) => set({ currentNavRange: r }),
   customNavStart: null,
   setCustomNavStart: (date) => set({ customNavStart: date }),

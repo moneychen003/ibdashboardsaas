@@ -12,9 +12,38 @@ import sqlite3
 import json
 import sys
 import math
+import threading
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+
+_cb_context = threading.local()
+
+def set_cost_basis_user_context(user_id):
+    """pgdash 在调用 generate_dashboard_data 前后设置/清除，用于 cost_basis Redis 缓存命名。"""
+    _cb_context.user_id = user_id
+
+
+def _cb_cache_get(user_id, account_id, max_stmt_date):
+    try:
+        import redis
+        r = redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+                           socket_timeout=0.5, socket_connect_timeout=0.5)
+        val = r.get(f"costbasis:{user_id}:{account_id}:{max_stmt_date}")
+        return json.loads(val) if val else None
+    except Exception:
+        return None
+
+
+def _cb_cache_set(user_id, account_id, max_stmt_date, result):
+    try:
+        import redis
+        r = redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+                           socket_timeout=0.5, socket_connect_timeout=0.5)
+        r.setex(f"costbasis:{user_id}:{account_id}:{max_stmt_date}",
+                7 * 24 * 3600, json.dumps(result, default=str))
+    except Exception:
+        pass
 
 from scripts.dashboard_extensions import (
     get_position_timeline,
@@ -88,12 +117,78 @@ def get_all_nav_history(conn, account_id=None):
 
 def get_flow_series(conn, account_id=None):
     """
-    基于 daily_nav.twr 反推每日外部现金流（ deposits / transfers / 出入金 ）。
-    公式: flow_today = ending_today - ending_yesterday * (1 + twr_today / 100)
-    对于 combined，使用各账户 NAV 加权计算 combined flow。
+    每日外部现金流（deposits/withdrawals/transfers/grants/corp-action 等）。
+    优先从 archive_change_in_nav 按 stmt_date 聚合显式字段；
+    无 CIN 数据时回落到基于 daily_nav.twr 的反推（老数据兼容路径）。
     返回 [(date, flow, ending), ...]
     """
     cursor = conn.cursor()
+
+    # Step 1: 尝试从 archive_change_in_nav 聚合显式 flow（精确口径）
+    flow_sum_expr = (
+        "CAST(COALESCE(deposits_withdrawals,'0') AS REAL) + "
+        "CAST(COALESCE(asset_transfers,'0') AS REAL) + "
+        "CAST(COALESCE(internal_cash_transfers,'0') AS REAL) + "
+        "CAST(COALESCE(grant_activity,'0') AS REAL) + "
+        "CAST(COALESCE(transferred_pnl_adjustments,'0') AS REAL) + "
+        "CAST(COALESCE(linking_adjustments,'0') AS REAL)"
+    )
+    cin_flow_map = {}
+    try:
+        if account_id:
+            cursor.execute(
+                f"SELECT stmt_date, SUM({flow_sum_expr}) FROM archive_change_in_nav "
+                f"WHERE stmt_account_id = ? GROUP BY stmt_date",
+                (account_id,))
+        else:
+            cursor.execute(
+                f"SELECT stmt_date, SUM({flow_sum_expr}) FROM archive_change_in_nav "
+                f"GROUP BY stmt_date")
+        for stmt_date, flow_sum in cursor.fetchall():
+            if stmt_date is None:
+                continue
+            cin_flow_map[stmt_date] = float(flow_sum or 0)
+    except sqlite3.OperationalError:
+        cin_flow_map = {}
+    # Step 1b: 补充 archive_cash_transaction 的 Deposits/Withdrawals —— 2026-03 起 IB FlexQuery
+    # 配置掉了 ChangeInNav.deposits_withdrawals 字段，只能从 cash_transaction 拿原始现金流。
+    # cash_transaction 按 original currency × fx_rate_to_base 换到 base。settle_date 是 YYYYMMDD。
+    ct_flow_map = {}
+    try:
+        if account_id:
+            cursor.execute(
+                "SELECT settle_date, SUM(CAST(amount AS REAL) * "
+                "COALESCE(CAST(NULLIF(fx_rate_to_base,'') AS REAL), 1)) "
+                "FROM archive_cash_transaction WHERE stmt_account_id = ? "
+                "AND type = 'Deposits/Withdrawals' "
+                "AND settle_date IS NOT NULL AND settle_date <> '' "
+                "GROUP BY settle_date",
+                (account_id,))
+        else:
+            cursor.execute(
+                "SELECT settle_date, SUM(CAST(amount AS REAL) * "
+                "COALESCE(CAST(NULLIF(fx_rate_to_base,'') AS REAL), 1)) "
+                "FROM archive_cash_transaction WHERE type = 'Deposits/Withdrawals' "
+                "AND settle_date IS NOT NULL AND settle_date <> '' GROUP BY settle_date")
+        for sd, flow_sum in cursor.fetchall():
+            if not sd:
+                continue
+            sd_str = str(sd)
+            if len(sd_str) == 8 and sd_str.isdigit():
+                sd_norm = f"{sd_str[:4]}-{sd_str[4:6]}-{sd_str[6:]}"
+            else:
+                sd_norm = sd_str
+            ct_flow_map[sd_norm] = ct_flow_map.get(sd_norm, 0.0) + float(flow_sum or 0)
+    except sqlite3.OperationalError:
+        ct_flow_map = {}
+
+    # 若 cash_transaction 有数据，视为权威源（更细粒度）。
+    # 否则继续用 change_in_nav。
+    if ct_flow_map:
+        cin_flow_map = ct_flow_map
+    has_cin = bool(cin_flow_map)
+
+    # Step 2: 遍历 daily_nav 生成 flow_series
     if account_id:
         cursor.execute('SELECT date, ending_value, twr FROM daily_nav WHERE account_id = ? ORDER BY date', (account_id,))
         rows = cursor.fetchall()
@@ -103,20 +198,19 @@ def get_flow_series(conn, account_id=None):
             ending_val = float(ending or 0)
             if i == 0:
                 flow = 0.0
+            elif has_cin:
+                flow = cin_flow_map.get(date, 0.0)
             else:
                 if twr is None:
                     flow = ending_val - prev_ending
                 else:
-                    twr_val = float(twr)
-                    expected = prev_ending * (1 + twr_val / 100)
-                    flow = ending_val - expected
+                    flow = ending_val - prev_ending * (1 + float(twr) / 100)
             result.append((date, flow, ending_val))
             prev_ending = ending_val
         return result
     else:
         cursor.execute('SELECT date, account_id, ending_value, twr FROM daily_nav ORDER BY date, account_id')
         rows = cursor.fetchall()
-        # Exclude defunct accounts (latest absolute NAV < 1) from combined flow
         cursor.execute('''
             SELECT DISTINCT account_id FROM daily_nav
             WHERE date = (SELECT MAX(date) FROM daily_nav)
@@ -137,6 +231,8 @@ def get_flow_series(conn, account_id=None):
             combined_ending = sum(float(v[0] or 0) for v in accounts.values())
             if not prev_accounts:
                 flow = 0.0
+            elif has_cin:
+                flow = cin_flow_map.get(date, 0.0)
             else:
                 expected = 0.0
                 for acc, (prev_ending, prev_twr) in prev_accounts.items():
@@ -147,13 +243,11 @@ def get_flow_series(conn, account_id=None):
                     if twr_acc is None:
                         expected += prev_ending_val
                     else:
-                        twr_val = float(twr_acc)
-                        expected += prev_ending_val * (1 + twr_val / 100)
+                        expected += prev_ending_val * (1 + float(twr_acc) / 100)
                 flow = combined_ending - expected
             result.append((date, flow, combined_ending))
             prev_accounts = {acc: (v[0], v[1]) for acc, v in accounts.items()}
         return result
-
 
 def get_nav_history_with_metrics(conn, account_id=None):
     """
@@ -290,17 +384,27 @@ def get_range_summary(nav_list, net_flow=0):
     if not nav_list or len(nav_list) < 2:
         start = nav_list[0]['nav'] if nav_list else 0
         end = start
-        return {'startNav': round(start, 2), 'endNav': round(end, 2), 'gain': 0, 'gainPct': 0, 'days': len(nav_list)}
+        return {
+            'startNav': round(start, 2), 'endNav': round(end, 2),
+            'gain': 0, 'gainPct': 0,
+            'rawGain': 0, 'rawGainPct': 0, 'netFlow': round(net_flow or 0, 2),
+            'days': len(nav_list)
+        }
     start = nav_list[0]['nav']
     end = nav_list[-1]['nav']
-    gain = end - start - net_flow
+    gain = end - start - net_flow           # 扣净入金后的真实收益
     invested = start + net_flow
     gain_pct = (gain / invested * 100) if invested else 0
+    raw_gain = end - start                  # 绝对变化（含净入金）
+    raw_gain_pct = (raw_gain / start * 100) if start else 0
     return {
         'startNav': round(start, 2),
         'endNav': round(end, 2),
         'gain': round(gain, 2),
         'gainPct': round(gain_pct, 2),
+        'rawGain': round(raw_gain, 2),
+        'rawGainPct': round(raw_gain_pct, 2),
+        'netFlow': round(net_flow or 0, 2),
         'days': len(nav_list)
     }
 
@@ -399,6 +503,303 @@ def get_cumulative_realized(conn, account_id=None):
         holdings[symbol] += qty
 
     return round(total_realized, 2)
+
+
+def get_realized_ytd(conn, account_id=None):
+    """从 archive_mtdytd_performance_summary_underlying 读取 YTD 已实现盈亏（含长/短期拆分）。
+    IB Flex 的 archive_change_in_nav.realized 字段近两年都是 0，这里取 mtdytd 表最新
+    stmt_date 的 SUM(realized_pnl_ytd) / SUM(real_ltytd) / SUM(real_stytd)。
+    返回 {ytd, lt, st, asOf}；无数据时全 0。"""
+    cursor = conn.cursor()
+    where = "stmt_account_id = ?" if account_id else "1=1"
+    params = (account_id,) if account_id else ()
+    try:
+        cursor.execute(f"SELECT MAX(stmt_date) FROM archive_mtdytd_performance_summary_underlying WHERE {where}", params)
+        row = cursor.fetchone()
+        latest = row[0] if row else None
+        if not latest:
+            return {"ytd": 0, "lt": 0, "st": 0, "asOf": None}
+        cursor.execute(
+            f"SELECT SUM(CAST(NULLIF(realized_pnl_ytd,'') AS REAL)), "
+            f"SUM(CAST(NULLIF(real_ltytd,'') AS REAL)), "
+            f"SUM(CAST(NULLIF(real_stytd,'') AS REAL)) "
+            f"FROM archive_mtdytd_performance_summary_underlying "
+            f"WHERE stmt_date = ? AND {where}",
+            (latest,) + params)
+        r = cursor.fetchone() or (0, 0, 0)
+        return {"ytd": safe_float(r[0]), "lt": safe_float(r[1]), "st": safe_float(r[2]), "asOf": latest}
+    except sqlite3.OperationalError:
+        return {"ytd": 0, "lt": 0, "st": 0, "asOf": None}
+
+
+def get_data_quality(conn, account_id=None):
+    """数据质量：各关键表的条数 + 最新日期，帮用户定位 Flex 同步是否断档。"""
+    cursor = conn.cursor()
+    # 表 → 取哪个列作为"最新日期"
+    plan = [
+        ('archive_trade', 'trade_date', 'stmt_account_id'),
+        ('archive_cash_transaction', 'report_date', 'stmt_account_id'),
+        ('archive_change_in_nav', 'stmt_date', 'stmt_account_id'),
+        ('archive_open_position', 'stmt_date', 'stmt_account_id'),
+        ('archive_statement_of_funds_line', 'date', 'stmt_account_id'),
+        ('archive_unbundled_commission_detail', 'stmt_date', 'stmt_account_id'),
+        ('archive_mtm_performance_summary_underlying', 'report_date', 'stmt_account_id'),
+        ('archive_mtdytd_performance_summary_underlying', 'stmt_date', 'stmt_account_id'),
+        ('archive_option_eae', 'stmt_date', 'stmt_account_id'),
+        ('archive_slb_fee', 'stmt_date', 'stmt_account_id'),
+        ('archive_slb_open_contract', 'stmt_date', 'stmt_account_id'),
+        ('archive_tier_interest_detail', 'stmt_date', 'stmt_account_id'),
+        ('archive_corporate_action', 'report_date', 'stmt_account_id'),
+        ('archive_conversion_rate', 'date', None),
+        ('archive_equity_summary_by_report_date_in_base', 'report_date', 'stmt_account_id'),
+        ('daily_nav', 'date', 'account_id'),
+        ('cost_basis_history', 'trade_date', 'account_id'),
+        ('positions', 'date', 'account_id'),
+        ('market_prices', 'last_updated', None),
+    ]
+    result = []
+    for table, date_col, acc_col in plan:
+        try:
+            if account_id and acc_col:
+                cursor.execute(f"SELECT COUNT(*), MAX({date_col}) FROM {table} WHERE {acc_col} = ?", (account_id,))
+            else:
+                cursor.execute(f"SELECT COUNT(*), MAX({date_col}) FROM {table}")
+            row = cursor.fetchone()
+            cnt = int(row[0] or 0)
+            latest = row[1]
+            result.append({'table': table, 'rowCount': cnt, 'latestDate': str(latest) if latest else None})
+        except sqlite3.OperationalError as e:
+            result.append({'table': table, 'rowCount': 0, 'latestDate': None, 'error': str(e)[:80]})
+    return {
+        'tables': result,
+        'generatedAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+
+
+def get_tax_view(conn, account_id=None):
+    """税务视图：已实现（YTD，长/短期）+ 未实现（按每个持仓最早 BUY 日期估算长/短期）。
+
+    IB Flex 默认未启 Lot Detail，所以未实现按长/短期的拆分是近似：以 cost_basis_history
+    中每个 symbol+account 的最早 BUY trade_date 为基准，若 > 365 天则整个持仓归为长期。
+    多批买入的 FIFO lot-level 精度需要启用 Lot Detail section 才能做到。
+    """
+    import datetime as _dt
+    cursor = conn.cursor()
+    where_pos = "account_id = ?" if account_id else "1=1"
+    where_cb = "account_id = ?" if account_id else "1=1"
+    params = (account_id,) if account_id else ()
+
+    realized = get_realized_ytd(conn, account_id)
+
+    try:
+        cursor.execute(f"SELECT symbol, account_id, MIN(trade_date) FROM cost_basis_history WHERE {where_cb} AND event_type = 'BUY' GROUP BY symbol, account_id", params)
+        first_buy_map = {(r[0], r[1]): r[2] for r in cursor.fetchall()}
+    except sqlite3.OperationalError:
+        first_buy_map = {}
+
+    cursor.execute(f"SELECT MAX(date) FROM positions WHERE {where_pos}", params)
+    row = cursor.fetchone()
+    latest_date = row[0] if row else None
+    if not latest_date:
+        return {
+            'realizedYtd': realized.get('ytd', 0),
+            'realizedLtYtd': realized.get('lt', 0),
+            'realizedStYtd': realized.get('st', 0),
+            'realizedAsOf': realized.get('asOf'),
+            'unrealizedTotal': 0, 'unrealizedLtEstimate': 0, 'unrealizedStEstimate': 0,
+            'unrealizedByHolding': [], 'asOf': None,
+            'note': '无持仓数据'
+        }
+
+    cursor.execute(f"SELECT symbol, account_id, asset_type, quantity, cost_basis_price, mark_price, COALESCE(position_value_in_base, position_value), COALESCE(mark_price_in_base, mark_price) FROM positions WHERE {where_pos} AND date = ?", params + (latest_date,))
+    pos_rows = cursor.fetchall()
+
+    # cost_basis_history 最新 total_qty/total_cost_avg per (symbol, account)
+    try:
+        cursor.execute(f"SELECT symbol, account_id, total_qty, total_cost_avg FROM cost_basis_history h WHERE {where_cb} AND trade_date = (SELECT MAX(trade_date) FROM cost_basis_history h2 WHERE h2.symbol = h.symbol AND h2.account_id = h.account_id)", params)
+        cb_map = {(r[0], r[1]): (float(r[2] or 0), float(r[3] or 0)) for r in cursor.fetchall()}
+    except sqlite3.OperationalError:
+        cb_map = {}
+
+    today = _dt.date.today()
+    holdings = []
+    lt_total = 0.0
+    st_total = 0.0
+    total = 0.0
+
+    for sym, acc, at, qty, cb_price_pos, mp, pv_base, mp_base in pos_rows:
+        qty = float(qty or 0)
+        mp = float(mp or 0)
+        pv_base = float(pv_base or 0)
+        if qty == 0 or mp == 0:
+            continue
+        # 优先从 cost_basis_history 取成本，否则用 positions.cost_basis_price
+        cb_total_qty, cb_total_cost = cb_map.get((sym, acc), (0, 0))
+        if cb_total_qty and cb_total_cost:
+            cb_price = cb_total_cost / cb_total_qty
+        elif cb_price_pos:
+            cb_price = float(cb_price_pos)
+        else:
+            cb_price = 0
+        if cb_price == 0:
+            continue
+        pv_native = qty * mp
+        fx = pv_base / pv_native if pv_native else 1.0
+        unrealized = (mp - cb_price) * qty * fx
+        total += unrealized
+
+        first_buy = first_buy_map.get((sym, acc))
+        holding_days = 0
+        if first_buy:
+            try:
+                if isinstance(first_buy, _dt.date):
+                    fb_date = first_buy
+                else:
+                    s = str(first_buy)
+                    if len(s) == 8 and s.isdigit():
+                        fb_date = _dt.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+                    else:
+                        fb_date = _dt.datetime.strptime(s[:10], '%Y-%m-%d').date()
+                holding_days = (today - fb_date).days
+            except Exception:
+                holding_days = 0
+
+        category = 'long' if holding_days > 365 else 'short'
+        if category == 'long':
+            lt_total += unrealized
+        else:
+            st_total += unrealized
+
+        holdings.append({
+            'symbol': sym, 'accountId': acc, 'assetType': at,
+            'quantity': round(qty, 4),
+            'costBasisPrice': round(cb_price, 4),
+            'markPrice': round(mp, 4),
+            'positionValueInBase': round(pv_base, 2),
+            'unrealizedInBase': round(unrealized, 2),
+            'firstBuyDate': str(first_buy) if first_buy else None,
+            'holdingDays': holding_days,
+            'category': category
+        })
+
+    holdings.sort(key=lambda h: -abs(h['unrealizedInBase']))
+
+    return {
+        'realizedYtd': realized.get('ytd', 0),
+        'realizedLtYtd': realized.get('lt', 0),
+        'realizedStYtd': realized.get('st', 0),
+        'realizedAsOf': realized.get('asOf'),
+        'unrealizedTotal': round(total, 2),
+        'unrealizedLtEstimate': round(lt_total, 2),
+        'unrealizedStEstimate': round(st_total, 2),
+        'unrealizedByHolding': holdings,
+        'asOf': str(latest_date),
+        'note': '未实现盈亏的长/短期拆分基于 cost_basis_history 中每标的最早一笔 BUY 的日期；IB FlexQuery 需启用 Lot Detail section 才能做严格 FIFO lot-level 计算'
+    }
+
+
+def get_option_eae_events(conn, account_id=None):
+    """期权 Exercise/Assignment/Expiration 事件 + 权利金归因"""
+    from collections import defaultdict
+    cursor = conn.cursor()
+    where = "stmt_account_id = ?" if account_id else "1=1"
+    params = (account_id,) if account_id else ()
+    try:
+        cursor.execute(f"SELECT date, stmt_date, symbol, underlying_symbol, put_call, strike, expiry, transaction_type, quantity, proceeds, realized_pnl, mtm_pnl, cost_basis, mark_price FROM archive_option_eae WHERE {where} AND transaction_type IS NOT NULL AND transaction_type != '' ORDER BY date DESC, symbol", params)
+        raw = cursor.fetchall()
+    except sqlite3.OperationalError:
+        return {'events': [], 'totalEvents': 0, 'summary': {}, 'byUnderlying': []}
+
+    events = []
+    for r in raw:
+        events.append({
+            'date': r[0],
+            'stmtDate': str(r[1]) if r[1] else None,
+            'symbol': r[2],
+            'underlyingSymbol': r[3],
+            'putCall': r[4],
+            'strike': safe_float(r[5]) if r[5] else None,
+            'expiry': r[6],
+            'transactionType': r[7],
+            'quantity': safe_float(r[8]),
+            'proceeds': safe_float(r[9]),
+            'realizedPnl': safe_float(r[10]),
+            'mtmPnl': safe_float(r[11]),
+            'costBasis': safe_float(r[12]),
+            'markPrice': safe_float(r[13]),
+        })
+
+    summary = defaultdict(lambda: {'count': 0, 'totalMtm': 0.0, 'totalProceeds': 0.0})
+    for e in events:
+        key = f"{e['transactionType']}_{e['putCall'] or '-'}"
+        summary[key]['count'] += 1
+        summary[key]['totalMtm'] += e['mtmPnl'] or 0
+        summary[key]['totalProceeds'] += e['proceeds'] or 0
+
+    by_underlying = defaultdict(lambda: {'events': 0, 'netMtm': 0.0, 'premiums': 0.0})
+    for e in events:
+        u = e['underlyingSymbol'] or e['symbol'] or '-'
+        by_underlying[u]['events'] += 1
+        by_underlying[u]['netMtm'] += e['mtmPnl'] or 0
+        by_underlying[u]['premiums'] += e['proceeds'] or 0
+
+    return {
+        'events': events[:200],
+        'totalEvents': len(events),
+        'summary': {k: {'count': v['count'], 'totalMtm': round(v['totalMtm'], 2), 'totalProceeds': round(v['totalProceeds'], 2)} for k, v in summary.items()},
+        'byUnderlying': sorted(
+            [{'symbol': s, 'events': v['events'], 'netMtm': round(v['netMtm'], 2), 'premiums': round(v['premiums'], 2)} for s, v in by_underlying.items()],
+            key=lambda x: -abs(x['netMtm'])
+        )
+    }
+
+
+def get_cash_opportunity(conn, account_id=None):
+    """闲置现金机会成本：按月聚合利息 + 与 SGOV 年化对比"""
+    from collections import defaultdict
+    cursor = conn.cursor()
+    where = "stmt_account_id = ?" if account_id else "1=1"
+    params = (account_id,) if account_id else ()
+    try:
+        cursor.execute(f"SELECT SUBSTR(CAST(stmt_date AS TEXT),1,7) AS month, currency, interest_type, SUM(CAST(NULLIF(total_interest,'') AS REAL)) AS interest, AVG(CAST(NULLIF(total_principal,'') AS REAL)) AS avg_principal, AVG(CAST(NULLIF(rate,'') AS REAL)) AS avg_rate FROM archive_tier_interest_detail WHERE {where} GROUP BY month, currency, interest_type ORDER BY month DESC", params)
+        rows = cursor.fetchall()
+    except sqlite3.OperationalError:
+        return {'monthly': [], 'totalCredit': 0, 'totalDebit': 0, 'totalNet': 0}
+
+    monthly = defaultdict(lambda: defaultdict(lambda: {'credit': 0.0, 'debit': 0.0, 'principal': 0.0, 'rate': 0.0}))
+    total_credit = 0.0
+    total_debit = 0.0
+    for month, curr, itype, interest, principal, rate in rows:
+        curr = curr or 'USD'
+        key = 'credit' if itype == 'Credit Interest' else 'debit'
+        interest = float(interest or 0)
+        if key == 'credit':
+            total_credit += interest
+        else:
+            total_debit += interest
+        monthly[month][curr][key] += interest
+        monthly[month][curr]['principal'] = max(monthly[month][curr].get('principal', 0), float(principal or 0))
+        monthly[month][curr]['rate'] = float(rate or 0)
+
+    monthly_list = []
+    for month in sorted(monthly.keys(), reverse=True):
+        month_credit = sum(v['credit'] for v in monthly[month].values())
+        month_debit = sum(v['debit'] for v in monthly[month].values())
+        monthly_list.append({
+            'month': month,
+            'byCurrency': {curr: {'credit': round(v['credit'], 2), 'debit': round(v['debit'], 2), 'principal': round(v['principal'], 2), 'rate': round(v['rate'], 4)} for curr, v in monthly[month].items()},
+            'monthCredit': round(month_credit, 2),
+            'monthDebit': round(month_debit, 2),
+            'monthNet': round(month_credit + month_debit, 2),
+        })
+
+    return {
+        'monthly': monthly_list,
+        'totalCredit': round(total_credit, 2),
+        'totalDebit': round(total_debit, 2),
+        'totalNet': round(total_credit + total_debit, 2),
+        'note': 'IB 分层利息（Credit = 你收到的，Debit = 你借保证金付的）。对比 SGOV 年化 ~4.8%，每 $100k 闲置一个月约 $400 收益。'
+    }
 
 
 def get_base_currency(conn, account_id=None):
@@ -548,6 +949,23 @@ def _calc_cost_basis_for_account(conn, account_id):
     where_opt = 'account_id = ?'
     params = (account_id,)
 
+    uid = getattr(_cb_context, 'user_id', None)
+    max_stmt_date = None
+    if uid:
+        try:
+            cursor.execute(
+                'SELECT MAX(stmt_date) FROM archive_trade WHERE stmt_account_id = ?',
+                (account_id,),
+            )
+            row = cursor.fetchone()
+            max_stmt_date = row[0] if row and row[0] else None
+            if max_stmt_date:
+                cached = _cb_cache_get(uid, account_id, max_stmt_date)
+                if cached is not None:
+                    return cached
+        except Exception:
+            max_stmt_date = None
+
     # 1. 读取期权行权 Assignment 记录
     cursor.execute(f'''
         SELECT underlying_symbol, symbol, quantity, mtm_pnl, date, put_call, strike
@@ -589,7 +1007,12 @@ def _calc_cost_basis_for_account(conn, account_id):
         if bs == 'BUY' and qty > 0:
             assigns = assignments_by_date_sym.get((symbol, date), [])
             if assigns:
-                best = min(assigns, key=lambda a: abs(a['shares'] - qty))
+                price_f = safe_float(price)
+                strike_match = [a for a in assigns
+                                if price_f > 0
+                                and abs(a['strike'] - price_f) < 0.01
+                                and abs(a['shares'] - qty) < 1]
+                best = strike_match[0] if strike_match else min(assigns, key=lambda a: abs(a['shares'] - qty))
                 if abs(best['shares'] - qty) < 1:
                     if best['put_call'] == 'P' and best['premium'] > 0:
                         premium_adj_diluted = -best['premium']
@@ -713,6 +1136,9 @@ def _calc_cost_basis_for_account(conn, account_id):
             'dilutedCostBasisMoney': diluted_money,
             'totalQty': total_qty_avg,
         }
+
+    if uid and max_stmt_date:
+        _cb_cache_set(uid, account_id, max_stmt_date, result)
     return result
 
 
@@ -1002,13 +1428,13 @@ def get_option_eae(conn, account_id=None):
         cursor.execute('''
             SELECT date, symbol, description, underlying_symbol, strike, expiry, put_call,
                    transaction_type, quantity, trade_price, mark_price, mtm_pnl, currency
-            FROM option_eae WHERE account_id = ? ORDER BY date
+            FROM option_eae WHERE account_id = ? ORDER BY date DESC
         ''', (account_id,))
     else:
         cursor.execute('''
             SELECT date, symbol, description, underlying_symbol, strike, expiry, put_call,
                    transaction_type, quantity, trade_price, mark_price, mtm_pnl, currency
-            FROM option_eae ORDER BY date
+            FROM option_eae ORDER BY date DESC
         ''')
     return [{
         'date': row[0], 'symbol': row[1], 'description': row[2], 'underlyingSymbol': row[3],
@@ -1028,9 +1454,9 @@ def get_performance(conn, account_id=None, latest_date=None):
         twr_val = row[7] or 0 if row else 0
     else:
         cursor.execute('''
-            SELECT SUM(starting_value), SUM(ending_value), SUM(mtm), SUM(realized), 
+            SELECT SUM(starting_value), SUM(ending_value), SUM(mtm), SUM(realized),
                    SUM(dividends), SUM(interest), SUM(commissions)
-            FROM daily_nav 
+            FROM daily_nav
             WHERE date = ?
         ''', (latest_date,))
         row = cursor.fetchone()
@@ -1047,6 +1473,17 @@ def get_performance(conn, account_id=None, latest_date=None):
             twr_val = ((ending - starting - deposit) / starting) * 100
         else:
             twr_val = 0.0
+        # combined 模式下 mtm/realized/dividends/interest/commissions 展示累计值，避免单日为 0
+        cursor.execute('''
+            SELECT SUM(CAST(mtm AS REAL)), SUM(CAST(realized AS REAL)),
+                   SUM(CAST(dividends AS REAL)), SUM(CAST(interest AS REAL)),
+                   SUM(CAST(commissions AS REAL))
+            FROM archive_change_in_nav
+        ''')
+        cum = cursor.fetchone() or (0, 0, 0, 0, 0)
+        if row:
+            row = (row[0], row[1], safe_float(cum[0]), safe_float(cum[1]),
+                   safe_float(cum[2]), safe_float(cum[3]), safe_float(cum[4]))
     if row and row[0] is not None:
         return {
             'startingValue': row[0] or 0,
@@ -1147,13 +1584,15 @@ def get_trades(conn, account_id=None, limit=2000):
     } for row in cursor.fetchall()]
 
 
-def get_daily_pnl(nav_all, flow_map=None):
-    """使用 pandas 从 NAV 序列计算每日盈亏，并扣除当日外部现金流（充值/提现）"""
+def get_daily_pnl(nav_all, flow_map=None, flex_pnl_map=None):
+    """每日盈亏。
+    pnl      = NAV 差 - 当日外部现金流（含 FX translation，钱包口径）
+    pnlFlex  = daily_nav 的 mtm+realized+dividends+interest+commissions（Flex 五列口径，不含 FX）
+    """
     s = _nav_to_series(nav_all)
     if s.empty:
         return []
     diff = s.diff().dropna()
-    # 过滤掉前后都是 0 的无效日
     valid = ~((s.shift(1).fillna(0) == 0) & (s == 0))
     diff = diff[valid]
     result = []
@@ -1161,7 +1600,10 @@ def get_daily_pnl(nav_all, flow_map=None):
         date_str = d.strftime('%Y-%m-%d')
         flow = flow_map.get(date_str, 0.0) if flow_map else 0.0
         real_pnl = v - flow
-        result.append({'date': date_str, 'pnl': round(real_pnl, 2)})
+        row = {'date': date_str, 'pnl': round(real_pnl, 2)}
+        if flex_pnl_map is not None and date_str in flex_pnl_map:
+            row['pnlFlex'] = round(flex_pnl_map[date_str], 2)
+        result.append(row)
     return result
 
 
@@ -1441,7 +1883,7 @@ def get_sold_positions_analysis(conn, account_id=None, lookback_days=30):
         else:
             # fallback: 尝试用 archive_trade 的 BUY 计算简单平均
             fc = fallback_costs.get(sym)
-            if fc and fc['buy_qty'] > 0:
+            if fc and fc["total_cost"] > 0:
                 pre_cost_avg = fc['total_cost']
                 pre_cost_diluted = fc['total_cost']
                 prev_qty = qty
@@ -2197,7 +2639,7 @@ def get_slb_data(conn, account_id=None):
             cols = [d[0] for d in cursor.description]
             for row in cursor.fetchall():
                 lst.append(dict(zip(cols, row)))
-        except OperationalError:
+        except sqlite3.OperationalError:
             pass  # table or column may not exist for this dataset
     return {'openContracts': open_contracts, 'activities': activities, 'fees': fees}
 
@@ -2298,21 +2740,32 @@ def get_mtm_performance_summary(conn, account_id=None, limit=3000):
 
 def get_change_in_nav_details(conn, account_id=None):
     cursor = conn.cursor()
-    where = 'stmt_account_id = ?' if account_id else '1=1'
-    sql = f'''
-        SELECT * FROM archive_change_in_nav
-        WHERE {where}
-        ORDER BY to_date DESC
-        LIMIT 1
-    '''
-    params = (account_id,) if account_id else ()
+    skip_cols = {'stmt_date', 'stmt_account_id', 'account_id', 'acct_alias',
+                 'currency', 'from_date', 'to_date', 'model'}
     try:
-        cursor.execute(sql, params)
-        cols = [d[0] for d in cursor.description]
-        row = cursor.fetchone()
-        if not row:
-            return {}
-        data = dict(zip(cols, row))
+        if account_id:
+            cursor.execute('''
+                SELECT * FROM archive_change_in_nav
+                WHERE stmt_account_id = ?
+                ORDER BY to_date DESC
+                LIMIT 1
+            ''', (account_id,))
+            cols = [d[0] for d in cursor.description]
+            row = cursor.fetchone()
+            if not row:
+                return {}
+            data = dict(zip(cols, row))
+        else:
+            # combined: 累加所有期间的数值字段，避免只取最后一行造成其他字段=0
+            cursor.execute('SELECT * FROM archive_change_in_nav LIMIT 1')
+            cols = [d[0] for d in cursor.description]
+            numeric_cols = [c for c in cols if c not in skip_cols]
+            if not numeric_cols:
+                return {}
+            sum_expr = ', '.join(f'SUM(CAST({c} AS REAL))' for c in numeric_cols)
+            cursor.execute(f'SELECT {sum_expr} FROM archive_change_in_nav')
+            srow = cursor.fetchone() or tuple(0 for _ in numeric_cols)
+            data = dict(zip(numeric_cols, srow))
         # Remove metadata keys and convert numeric fields to float
         numeric_keys = [
             'starting_value', 'ending_value', 'mtm', 'realized', 'dividends', 'interest',
@@ -2335,7 +2788,7 @@ def get_change_in_nav_details(conn, account_id=None):
             else:
                 result[k] = safe_float(v) if v not in (None, '') else 0.0
         return result
-    except OperationalError:
+    except sqlite3.OperationalError:
         return {}
 
 
@@ -2380,7 +2833,15 @@ def get_balance_breakdown(conn, account_id=None):
         if acc:
             cursor.execute('SELECT ending_value FROM daily_nav WHERE account_id = ? ORDER BY date DESC LIMIT 1', (acc,))
         else:
-            cursor.execute('SELECT SUM(ending_value) FROM daily_nav WHERE date = (SELECT MAX(date) FROM daily_nav)')
+            # Combined: sum each account's latest ending_value (accounts may have
+            # different max dates; do NOT require the global MAX(date)).
+            cursor.execute('''
+                SELECT COALESCE(SUM(d.ending_value), 0)
+                FROM daily_nav d
+                JOIN (
+                    SELECT account_id, MAX(date) AS mx FROM daily_nav GROUP BY account_id
+                ) latest ON latest.account_id = d.account_id AND latest.mx = d.date
+            ''')
         row = cursor.fetchone()
         return safe_float(row[0]) if row else 0.0
     
@@ -2491,11 +2952,13 @@ def get_balance_breakdown(conn, account_id=None):
     def get_equity_summary(acc):
         fields = ['cash', 'stock', 'options', 'funds', 'bonds', 'commodities', 'dividend_accruals', 'interest_accruals', 'cfd_unrealized_pl']
         if acc:
+            # Dup rows for same stmt_date exist; rowid DESC picks the last inserted
+            # which corresponds to the day's ending snapshot, not the starting one.
             cursor.execute(f'''
                 SELECT {','.join(fields)}
                 FROM archive_equity_summary_by_report_date_in_base
                 WHERE stmt_account_id = ?
-                ORDER BY stmt_date DESC
+                ORDER BY stmt_date DESC, rowid DESC
                 LIMIT 1
             ''', (acc,))
             row = cursor.fetchone()
@@ -2511,7 +2974,7 @@ def get_balance_breakdown(conn, account_id=None):
                     SELECT {','.join(fields)}
                     FROM archive_equity_summary_by_report_date_in_base
                     WHERE stmt_account_id = ?
-                    ORDER BY stmt_date DESC
+                    ORDER BY stmt_date DESC, rowid DESC
                     LIMIT 1
                 ''', (a,))
                 row = cursor.fetchone()
@@ -2567,12 +3030,27 @@ def get_balance_breakdown(conn, account_id=None):
                     else:
                         currencies[curr] = val
             cash_rows = [(k, v, None, None) for k, v in sorted(currencies.items()) if v is not None]
-            # Fallback to equity summary cash for combined
-            if not cash_rows:
-                cursor.execute('SELECT SUM(cash) FROM archive_equity_summary_by_report_date_in_base WHERE cash IS NOT NULL AND cash != \'\'')
-                row = cursor.fetchone()
-                if row and row[0] is not None and str(row[0]).strip() != '':
-                    cash_rows = [('BASE', row[0], None, None)]
+            # Fallback to equity summary cash for combined —— 只聚合每个账户最新 stmt_date 的 cash，
+            # 避免把历史快照全部累加（cash 列已折算到 base currency）
+            cr_total = sum(v for _, v, _, _ in cash_rows if v is not None) if cash_rows else 0
+            cursor.execute('SELECT DISTINCT stmt_account_id FROM archive_equity_summary_by_report_date_in_base')
+            _eq_total = 0.0
+            for (_ea,) in cursor.fetchall():
+                # Dup rows exist for same (account, stmt_date). rowid DESC picks
+                # the day's last inserted row = ending cash, not a day-start / delta.
+                cursor.execute(
+                    "SELECT CAST(cash AS REAL) FROM archive_equity_summary_by_report_date_in_base "
+                    "WHERE stmt_account_id = ? "
+                    "AND cash IS NOT NULL AND cash != '' "
+                    "ORDER BY stmt_date DESC, rowid DESC LIMIT 1",
+                    (_ea,)
+                )
+                _r = cursor.fetchone()
+                if _r and _r[0] is not None:
+                    _eq_total += safe_float(_r[0])
+            eq_total = _eq_total
+            if abs(eq_total) > 0.01 and (not cash_rows or abs(eq_total) > abs(cr_total)):
+                cash_rows = [('BASE', eq_total, None, None)]
         
         # 获取各币种持仓市值（原币种）
         if acc:
@@ -2625,10 +3103,11 @@ def get_balance_breakdown(conn, account_id=None):
         return result
     
     def get_realized(acc):
+        # 累计已实现盈亏（从开仓到最新）
         if acc:
-            cursor.execute('SELECT realized FROM daily_nav WHERE account_id = ? ORDER BY date DESC LIMIT 1', (acc,))
+            cursor.execute('SELECT SUM(realized) FROM daily_nav WHERE account_id = ?', (acc,))
         else:
-            cursor.execute('SELECT SUM(realized) FROM daily_nav WHERE date = (SELECT MAX(date) FROM daily_nav)')
+            cursor.execute('SELECT SUM(realized) FROM daily_nav')
         row = cursor.fetchone()
         return safe_float(row[0]) if row else 0.0
     
@@ -2956,7 +3435,20 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
     monthly_trade_stats = _compute('monthly_trade_stats', lambda: get_monthly_trade_stats(conn, account_id), [])
     
     trades = _compute('trades', lambda: get_trades(conn, account_id), [])
-    daily_pnl = _compute('daily_pnl', lambda: get_daily_pnl(nav_all, flow_map), [])
+    # Flex 口径每日 PnL（daily_nav.mtm+realized+div+int+comm）
+    flex_pnl_map = {}
+    try:
+        _cur = conn.cursor()
+        if account_id:
+            _cur.execute("SELECT date, CAST(mtm AS REAL)+CAST(realized AS REAL)+CAST(dividends AS REAL)+CAST(interest AS REAL)+CAST(commissions AS REAL) FROM daily_nav WHERE account_id = ?", (account_id,))
+        else:
+            _cur.execute("SELECT date, SUM(CAST(mtm AS REAL)+CAST(realized AS REAL)+CAST(dividends AS REAL)+CAST(interest AS REAL)+CAST(commissions AS REAL)) FROM daily_nav GROUP BY date")
+        for _d, _p in _cur.fetchall():
+            if _d is not None:
+                flex_pnl_map[_d] = float(_p or 0)
+    except Exception:
+        flex_pnl_map = {}
+    daily_pnl = _compute('daily_pnl', lambda: get_daily_pnl(nav_all, flow_map, flex_pnl_map), [])
     trade_pnl_analysis = _compute('trade_pnl_analysis', lambda: get_trade_pnl_analysis(trades), {})
     trade_behavior = _compute('trade_behavior', lambda: get_trade_behavior_analysis(trades), {})
     cost_breakdown = _compute('cost_breakdown', lambda: get_cost_breakdown(conn, account_id), {})
@@ -3016,6 +3508,11 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
     wash_sale_alerts = _compute('wash_sale_alerts', lambda: get_wash_sale_alerts(conn, account_id), {'potentialWashSales': [], 'taxLossHarvestingOpportunities': []})
     options_strategy_lens = _compute('options_strategy_lens', lambda: get_options_strategy_lens(conn, account_id), {'currentStrategies': [], 'expiryCalendar': [], 'upcomingEAE': []})
 
+    _tax_view = _compute('tax_view', lambda: get_tax_view(conn, account_id), {'realizedYtd': 0, 'unrealizedByHolding': []})
+    _option_eae = _compute('option_eae', lambda: get_option_eae_events(conn, account_id), {'events': [], 'totalEvents': 0, 'summary': {}, 'byUnderlying': []})
+    _cash_opp = _compute('cash_opportunity', lambda: get_cash_opportunity(conn, account_id), {'monthly': [], 'totalCredit': 0, 'totalDebit': 0, 'totalNet': 0})
+    _data_quality = _compute('data_quality', lambda: get_data_quality(conn, account_id), {'tables': []})
+    _realized_ytd = _compute('realized_ytd', lambda: get_realized_ytd(conn, account_id), {'ytd': 0, 'lt': 0, 'st': 0, 'asOf': None})
     change_in_nav = {
         'startingValue': round(perf_starting_value, 2),
         'endingValue': round(true_perf['latestEnding'], 2),
@@ -3041,7 +3538,11 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
         'withholdingTax': change_in_nav_details.get('withholding_tax', 0),
         'corporateActionProceeds': change_in_nav_details.get('corporate_action_proceeds', 0),
         'netFxTrading': change_in_nav_details.get('net_fx_trading', 0),
-        'fxTranslation': change_in_nav_details.get('fx_translation', 0)
+        'fxTranslation': change_in_nav_details.get('fx_translation', 0),
+        'realizedYtd': _realized_ytd.get('ytd', 0),
+        'realizedLtYtd': _realized_ytd.get('lt', 0),
+        'realizedStYtd': _realized_ytd.get('st', 0),
+        'realizedYtdAsOf': _realized_ytd.get('asOf')
     }
 
     # 如果存在实时市场价格，将 asOfDate 更新为当前时间（精确到分钟）
@@ -3074,7 +3575,40 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
                         fx = pv_base / pv if pv else 1.0
                         live_pv_base = contracts * live_price * 100 * fx
                         delta += live_pv_base - pv_base
-                balance_breakdown['netLiquidation'] = round(balance_breakdown['netLiquidation'] + delta, 2)
+                if delta:
+                    balance_breakdown['netLiquidation'] = round(balance_breakdown['netLiquidation'] + delta, 2)
+                    # 同步实时 NAV 变化到依赖 netLiquidation 的其他字段，保持页面内一致
+                    try:
+                        leverage_metrics['netLiquidation'] = round(leverage_metrics.get('netLiquidation', 0) + delta, 2)
+                        _nl = leverage_metrics['netLiquidation']
+                        _ge = leverage_metrics.get('grossExposure', 0)
+                        leverage_metrics['leverageRatio'] = round(_ge / _nl, 2) if _nl else 0
+                    except Exception:
+                        pass
+                    try:
+                        change_in_nav['endingValue'] = round(change_in_nav.get('endingValue', 0) + delta, 2)
+                        _old_cg = change_in_nav.get('totalGain', 0)
+                        _old_cgp = change_in_nav.get('totalGainPct', 0)
+                        change_in_nav['totalGain'] = round(_old_cg + delta, 2)
+                        if abs(_old_cgp) > 1e-9 and abs(_old_cg) > 1e-9:
+                            _inv = _old_cg * 100.0 / _old_cgp
+                            if _inv:
+                                change_in_nav['totalGainPct'] = round(change_in_nav['totalGain'] / _inv * 100.0, 2)
+                    except Exception:
+                        pass
+                    try:
+                        for _rs in range_summaries.values():
+                            _old_end = _rs.get('endNav', 0)
+                            _old_gain = _rs.get('gain', 0)
+                            _old_gp = _rs.get('gainPct', 0)
+                            _rs['endNav'] = round(_old_end + delta, 2)
+                            _rs['gain'] = round(_old_gain + delta, 2)
+                            if abs(_old_gp) > 1e-9 and abs(_old_gain) > 1e-9:
+                                _inv2 = _old_gain * 100.0 / _old_gp
+                                if _inv2:
+                                    _rs['gainPct'] = round(_rs['gain'] / _inv2 * 100.0, 2)
+                    except Exception:
+                        pass
             except Exception:
                 pass
     except Exception:
@@ -3167,6 +3701,10 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
         'latestDayTrades': latest_day_trades,
         'costBasisHoldings': cost_basis_holdings,
         'soldAnalysis': sold_analysis,
+        'taxView': _tax_view,
+        'optionEaeEvents': _option_eae,
+        'cashOpportunity': _cash_opp,
+        'dataQuality': _data_quality,
         'positionTimeline': position_timeline,
         'orderExecution': order_execution,
         'fxExposure': fx_exposure,
