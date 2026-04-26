@@ -2492,6 +2492,7 @@ def get_position_attribution(conn, account_id=None):
                        position_value, fifo_pnl_unrealized, mark_price, cost_basis_price
                 FROM archive_open_position
                 WHERE stmt_account_id = ? AND stmt_date = ?
+                AND (level_of_detail = 'SUMMARY' OR level_of_detail IS NULL OR level_of_detail = '')
             ''', (account_id, max_date))
             for r in cursor.fetchall():
                 raw_rows.append((account_id, max_date, r))
@@ -2519,6 +2520,7 @@ def get_position_attribution(conn, account_id=None):
                        position_value, fifo_pnl_unrealized, mark_price, cost_basis_price
                 FROM archive_open_position
                 WHERE stmt_account_id = ? AND stmt_date = ?
+                AND (level_of_detail = 'SUMMARY' OR level_of_detail IS NULL OR level_of_detail = '')
             ''', (acc, max_date))
             for r in cursor.fetchall():
                 raw_rows.append((acc, max_date, r))
@@ -3016,6 +3018,7 @@ def get_balance_breakdown(conn, account_id=None):
                 SELECT symbol, description, asset_category, currency, fx_rate_to_base, position_value, fifo_pnl_unrealized
                 FROM archive_open_position
                 WHERE stmt_account_id = ? AND stmt_date = ?
+                AND (level_of_detail = 'SUMMARY' OR level_of_detail IS NULL OR level_of_detail = '')
             ''', (acc, max_date))
             breakdown = {}
             total_unrealized = 0.0
@@ -3065,6 +3068,7 @@ def get_balance_breakdown(conn, account_id=None):
                     SELECT symbol, description, asset_category, currency, fx_rate_to_base, position_value, fifo_pnl_unrealized
                     FROM archive_open_position
                     WHERE stmt_account_id = ? AND stmt_date = ?
+                    AND (level_of_detail = 'SUMMARY' OR level_of_detail IS NULL OR level_of_detail = '')
                 ''', (a, max_date))
                 for symbol, description, asset_category, currency, fx_rate_to_base, position_value, fifo_pnl_unrealized in cursor.fetchall():
                     cat = (asset_category or '').upper()
@@ -3191,6 +3195,7 @@ def get_balance_breakdown(conn, account_id=None):
                 FROM archive_open_position
                 WHERE stmt_account_id = ?
                   AND stmt_date = (SELECT MAX(stmt_date) FROM archive_open_position WHERE stmt_account_id = ?)
+                  AND (level_of_detail = 'SUMMARY' OR level_of_detail IS NULL OR level_of_detail = '')
                 GROUP BY currency
             ''', (acc, acc))
             pos_by_currency = {row[0]: safe_float(row[1]) for row in cursor.fetchall()}
@@ -3219,6 +3224,7 @@ def get_balance_breakdown(conn, account_id=None):
                     SELECT currency, SUM(position_value)
                     FROM archive_open_position
                     WHERE stmt_account_id = ? AND stmt_date = ?
+                    AND (level_of_detail = 'SUMMARY' OR level_of_detail IS NULL OR level_of_detail = '')
                     GROUP BY currency
                 ''', (a, max_date))
                 for curr, val in cursor.fetchall():

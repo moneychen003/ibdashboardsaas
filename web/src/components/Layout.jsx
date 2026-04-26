@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 
-import { LayoutDashboard, Briefcase, TrendingUp, FileText, RefreshCw, Receipt, Settings, HelpCircle, ChevronDown, Menu, PartyPopper, FolderUp, Upload, Sparkles, Trophy, AlertTriangle, X } from 'lucide-react';import { useNavigate, useParams } from 'react-router-dom';
+import { LayoutDashboard, Briefcase, TrendingUp, FileText, RefreshCw, Receipt, Settings, HelpCircle, ChevronDown, Menu, PartyPopper, FolderUp, Upload, Sparkles, Trophy, AlertTriangle, X } from 'lucide-react';import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useDashboardStore } from '../stores/dashboardStore';
 import SettingsPanel from './SettingsPanel';
 import ReleaseNotesModal from './ReleaseNotesModal';
@@ -14,6 +14,7 @@ function classNames(...c) {
 
 export default function Layout({ children }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { account, tab } = useParams();
 
   const auth = useDashboardStore((s) => s.auth);
@@ -91,11 +92,11 @@ export default function Layout({ children }) {
   ].filter((t) => t.show);
 
   function navigateToAccount(alias) {
-    navigate(`/${alias}/${tab || activeTab || 'overview'}`);
+    navigate(`/${alias}/${tab || activeTab || 'overview'}${location.search}`);
   }
 
   function navigateToTab(tabId) {
-    navigate(`/${account || currentAccount || 'combined'}/${tabId}`);
+    navigate(`/${account || currentAccount || 'combined'}/${tabId}${location.search}`);
   }
 
   function isAnyUploading() {
