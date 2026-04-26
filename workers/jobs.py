@@ -20,6 +20,36 @@ from rq import get_current_job
 from db.postgres_client import execute
 
 
+def _sync_base_currency_from_archive(user_id: str):
+    """Sync user_profiles.base_currency from latest archive_account_information.currency.
+
+    IB account base currency is the ground truth; user_profiles default 'USD' is just a
+    placeholder. Without this sync, CNH/HKD-base accounts render with wrong currency symbol.
+    """
+    try:
+        with get_cursor() as cur:
+            cur.execute('''
+                SELECT currency FROM archive_account_information
+                WHERE user_id = %s AND currency IS NOT NULL AND currency != ''
+                ORDER BY stmt_date DESC LIMIT 1
+            ''', (user_id,))
+            row = cur.fetchone()
+            if not row:
+                return
+            ib_curr = row.get('currency') if isinstance(row, dict) else row[0]
+            if not ib_curr:
+                return
+            cur.execute('''
+                INSERT INTO user_profiles (user_id, base_currency)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id) DO UPDATE
+                SET base_currency = EXCLUDED.base_currency, updated_at = NOW()
+                WHERE user_profiles.base_currency IS DISTINCT FROM EXCLUDED.base_currency
+            ''', (user_id, ib_curr))
+    except Exception as e:
+        print(f"[base_currency_sync] failed for {user_id}: {e}")
+
+
 def import_xml_job(user_id: str, upload_id: str, file_path: str):
     """Background job: import XML into PostgreSQL and refresh cost basis."""
     # Update status to running
@@ -51,6 +81,9 @@ def import_xml_job(user_id: str, upload_id: str, file_path: str):
         # Enforce history retention BEFORE refresh, so cost basis uses full history
         limits = get_user_limits(user_id)
         enforce_history_retention(user_id, account_id, limits.get("max_history_months", 3))
+
+        # Sync base_currency from IB account so dashboard renders correct currency symbol
+        _sync_base_currency_from_archive(user_id)
 
         refresh_user_account(user_id, account_id)
 
@@ -281,6 +314,9 @@ def flex_sync_job(user_id: str):
         # Enforce history retention BEFORE refresh, so cost basis uses full history
         limits = get_user_limits(user_id)
         enforce_history_retention(user_id, account_id, limits.get("max_history_months", 3))
+
+        # Sync base_currency from IB account so dashboard renders correct currency symbol
+        _sync_base_currency_from_archive(user_id)
 
         refresh_user_account(user_id, account_id)
 
