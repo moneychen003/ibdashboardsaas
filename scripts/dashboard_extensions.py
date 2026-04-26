@@ -840,17 +840,37 @@ def get_risk_radar(conn, account_id=None):
         row = cursor.fetchone()
         nav = safe_float(row[0]) if row else 0.0
 
-    # Concentration
+    # Concentration — use ABS exposure so large shorts count toward concentration.
+    # JOIN archive_conversion_rate to handle rows where fx_rate_to_base is empty
+    # (common for owner's data: position_value is in USD but column is null).
+    # Filter to SUMMARY/NULL to avoid LOT/SUMMARY double-counting.
     cursor.execute(f'''
-        SELECT symbol, SUM(CAST(position_value AS REAL) * COALESCE(CAST(fx_rate_to_base AS REAL), 1.0)) as val
-        FROM archive_open_position
-        WHERE {where} AND stmt_date = (SELECT MAX(stmt_date) FROM archive_open_position WHERE {where})
-        GROUP BY symbol
-        ORDER BY val DESC
+        SELECT p.symbol,
+               SUM(CAST(p.position_value AS REAL) *
+                   COALESCE(
+                       NULLIF(CAST(p.fx_rate_to_base AS REAL), 0),
+                       CAST(cr.rate AS REAL),
+                       1.0
+                   )) AS val
+        FROM archive_open_position p
+        LEFT JOIN archive_conversion_rate cr
+          ON cr.stmt_account_id = p.stmt_account_id
+         AND cr.stmt_date = p.stmt_date
+         AND UPPER(cr.from_currency) = UPPER(COALESCE(NULLIF(p.currency,''), 'USD'))
+        WHERE {where.replace('stmt_account_id', 'p.stmt_account_id')}
+          AND p.stmt_date = (SELECT MAX(stmt_date) FROM archive_open_position WHERE {where})
+          AND (p.level_of_detail = 'SUMMARY' OR p.level_of_detail IS NULL OR p.level_of_detail = '')
+        GROUP BY p.symbol
+        ORDER BY ABS(SUM(CAST(p.position_value AS REAL) *
+                   COALESCE(
+                       NULLIF(CAST(p.fx_rate_to_base AS REAL), 0),
+                       CAST(cr.rate AS REAL),
+                       1.0
+                   ))) DESC
     ''', params + params)
     pos = [(r[0], safe_float(r[1])) for r in cursor.fetchall()]
-    total_pos = sum(v for _, v in pos)
-    max_single = (pos[0][1] / max(nav, 1)) * 100 if pos else 0
+    total_abs = sum(abs(v) for _, v in pos)
+    max_single = (abs(pos[0][1]) / max(abs(nav), 1)) * 100 if pos else 0
 
     # Leverage
     cursor.execute(f'''
@@ -884,7 +904,7 @@ def get_risk_radar(conn, account_id=None):
     return {
         'concentration': {
             'singleStockMaxPct': round(max_single, 2),
-            'top5Pct': round(sum(v for _, v in pos[:5]) / max(nav, 1) * 100, 2) if pos else 0,
+            'top5Pct': round(sum(abs(v) for _, v in pos[:5]) / max(abs(nav), 1) * 100, 2) if pos else 0,
             'totalPositions': len(pos)
         },
         'radarScores': {
