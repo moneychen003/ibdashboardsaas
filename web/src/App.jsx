@@ -7,11 +7,13 @@ import PerformanceTab from './components/tabs/PerformanceTab';
 import PositionsTab from './components/tabs/PositionsTab';
 import DetailsTab from './components/tabs/DetailsTab';
 import ChangesTab from './components/tabs/ChangesTab';
+import TaxTab from './components/tabs/TaxTab';
+import ChengjiTab from './components/tabs/ChengjiTab';
+import SharePage from "./pages/SharePage";
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import AdminPage from './pages/AdminPage';
 import HelpPage from './pages/HelpPage';
-import PublicSharePage from './pages/PublicSharePage';
 
 function DashboardRoute() {
   const { account, tab } = useParams();
@@ -62,21 +64,9 @@ function DashboardRoute() {
     }
   }, [account, tab, currentAccount, accounts.length, location.pathname, navigate]);
 
-  const shareMode = useDashboardStore((s) => s.shareMode);
-
-  // Share mode: redirect to first allowed tab if current tab is not allowed
-  useEffect(() => {
-    if (!shareMode || !tab) return;
-    const allowed = shareMode.allowedTabs || ['overview'];
-    if (!allowed.includes(tab)) {
-      const firstTab = allowed[0];
-      navigate(`/${account || currentAccount || 'combined'}/${firstTab}${location.search}`, { replace: true });
-    }
-  }, [tab, shareMode, account, currentAccount, location.search, navigate]);
-
   const loadedSlices = useDashboardStore((s) => s.loadedSlices);
   const isTabLoading = !!tabLoading[activeTab];
-  const sliceMap = { overview: 'overview', positions: 'positions', performance: 'performance', details: 'details', changes: 'changes' };
+  const sliceMap = { overview: 'overview', positions: 'positions', performance: 'performance', details: 'details', changes: 'changes', chengji: 'chengji' };
   const isSliceReady = loadedSlices[sliceMap[activeTab]] === currentAccount;
   const showLoading = loading || (isTabLoading && !isSliceReady);
 
@@ -100,6 +90,8 @@ function DashboardRoute() {
           {activeTab === 'positions' && <PositionsTab />}
           {activeTab === 'details' && <DetailsTab />}
           {activeTab === 'changes' && <ChangesTab />}
+          {activeTab === 'tax' && <TaxTab />}
+          {activeTab === 'chengji' && <ChengjiTab />}
         </>
       )}
       {isTabLoading && (
@@ -119,11 +111,11 @@ function RequireAuth({ children }) {
 export default function App() {
   return (
     <Routes>
+      <Route path="/share/:token" element={<SharePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/admin" element={<RequireAuth><AdminPage /></RequireAuth>} />
       <Route path="/help" element={<HelpPage />} />
-      <Route path="/share/:token" element={<PublicSharePage />} />
       <Route path="/" element={<DashboardRoute />} />
       <Route path="/:account" element={<DashboardRoute />} />
       <Route path="/:account/:tab" element={<DashboardRoute />} />

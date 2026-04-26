@@ -73,6 +73,16 @@ def import_xml_job(user_id: str, upload_id: str, file_path: str):
                 (account_id, upload_id)
             )
 
+
+    # 失败时立即删除磁盘 XML（archive_* 表已有权威数据，xml_uploads 表保留审计元信息）
+    if result.get('status') == 'failed':
+        try:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"[cleanup] Removed failed upload {file_path}")
+        except Exception as _cleanup_err:
+            print(f"[cleanup] Failed to remove {file_path}: {_cleanup_err}")
+
     return result
 
 

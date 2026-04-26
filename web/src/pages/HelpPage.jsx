@@ -191,16 +191,109 @@ export default function HelpPage() {
             点击右上角「⚙️ 设置」可打开设置面板，常用功能包括：
             <ul className="mt-2 list-disc space-y-1 pl-5 text-[var(--gray)]">
               <li><b>系统状态</b>：查看最新导入时间、数据新鲜度、磁盘空间，并可一键刷新数据缓存。</li>
-              <li><b>数据运维</b>：查看导入历史，运行数据质量检查。</li>
-              <li><b>备份恢复</b>：手动创建备份或在出错时恢复到之前的备份点。</li>
+              <li><b>导入数据</b>：手动上传 XML 报表，或重置已导入的数据。</li>
               <li><b>账户与货币</b>：修改基础货币（默认 USD）、添加自定义汇率覆盖、管理账户别名与颜色。</li>
               <li><b>IB 自动同步</b>：配置 Flex Query 凭据，实现定时自动拉取最新报表（可选）。</li>
-              <li><b>系统清理</b>：一键清理过期上传文件、日志与旧备份。</li>
+              <li><b>市场数据</b>：选择行情数据源（Finnhub / Yahoo / Webull 等），用于盘中实时价格刷新。</li>
+              <li><b>TG 机器人</b>：绑定 Telegram，订阅每日净值播报与持仓查询命令。</li>
+              <li><b>分享面板</b>：生成只读分享链接，可指定可见 Tab 与有效期。</li>
             </ul>
-            <Tip>普通用户只能看到与自己相关的设置项；「游客权限」等管理员功能仅对超级管理员可见。</Tip>
           </Step>
 
-          <Step n={7} title="最佳实践与注意事项">
+          <Step n={7} title="使用 Telegram 机器人查询账户">
+            把账户绑定到 Telegram，可以随时通过聊天查询净值、持仓、成本、交易等数据，并订阅每日净值播报。
+            <div className="mt-4 space-y-4">
+              <div>
+                <div className="mb-2 font-semibold">1. 绑定流程</div>
+                <ol className="ml-1 list-decimal space-y-1 pl-5 text-sm text-[var(--gray)]">
+                  <li>本站「设置 → TG 机器人」点「生成绑定码」，会弹出一串 6 位数字（10 分钟有效）。</li>
+                  <li>在 Telegram 里搜索 <b>@ibdashboard_bot</b>，开启对话。</li>
+                  <li>发送 <code>/bind 123456</code>（把 123456 替换成你刚才生成的码）即可绑定。</li>
+                  <li>绑定成功后，本站设置里会出现 chat_id 与用户名；可以勾选「订阅每日播报」。</li>
+                </ol>
+                <Tip>一个 Telegram 会话只能绑定一个账户。如果需要换绑，先 <code>/unbind</code> 再重新绑。</Tip>
+              </div>
+
+              <div>
+                <div className="mb-2 font-semibold">2. 常用查询命令</div>
+                <div className="overflow-hidden rounded-lg border border-[var(--light-gray)] text-sm">
+                  <table className="w-full">
+                    <thead className="bg-[var(--lighter-gray)] text-xs">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold">命令</th>
+                        <th className="px-3 py-2 text-left font-semibold">用途</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-[var(--gray)]">
+                      <tr className="border-t border-[var(--lighter-gray)]"><td className="px-3 py-2"><code>/nav</code></td><td className="px-3 py-2">当前净值 + 当日 / 累计盈亏</td></tr>
+                      <tr className="border-t border-[var(--lighter-gray)]"><td className="px-3 py-2"><code>/holdings</code></td><td className="px-3 py-2">Top 10 持仓（按市值，含浮盈）</td></tr>
+                      <tr className="border-t border-[var(--lighter-gray)]"><td className="px-3 py-2"><code>/cost AAPL</code></td><td className="px-3 py-2">单标的的移动加权 + 摊薄成本与浮盈</td></tr>
+                      <tr className="border-t border-[var(--lighter-gray)]"><td className="px-3 py-2"><code>/trades</code></td><td className="px-3 py-2">最近一个交易日的全部成交</td></tr>
+                      <tr className="border-t border-[var(--lighter-gray)]"><td className="px-3 py-2"><code>/pnl7</code></td><td className="px-3 py-2">近 7 个交易日的每日盈亏</td></tr>
+                      <tr className="border-t border-[var(--lighter-gray)]"><td className="px-3 py-2"><code>/tax</code></td><td className="px-3 py-2">YTD 已实现盈亏（长期 / 短期拆分）</td></tr>
+                      <tr className="border-t border-[var(--lighter-gray)]"><td className="px-3 py-2"><code>/sub</code> / <code>/unsub</code></td><td className="px-3 py-2">订阅 / 取消每日 22:00 净值播报</td></tr>
+                      <tr className="border-t border-[var(--lighter-gray)]"><td className="px-3 py-2"><code>/status</code></td><td className="px-3 py-2">查看当前绑定状态</td></tr>
+                      <tr className="border-t border-[var(--lighter-gray)]"><td className="px-3 py-2"><code>/unbind</code></td><td className="px-3 py-2">解绑当前会话</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 font-semibold">3. 每日播报</div>
+                <div className="text-sm text-[var(--gray)]">
+                  开启 <code>/sub</code> 后，每天北京时间 22:00 会推送一条净值简报：总净值、当日盈亏、累计盈亏 / 涨跌幅、YTD 已实现长 / 短期。<b>不发交易明细</b>，需要看具体成交请发 <code>/trades</code>。
+                </div>
+              </div>
+            </div>
+          </Step>
+
+          <Step n={8} title="生成只读分享面板">
+            想把账户净值或持仓发给朋友 / 顾问看，又不希望对方能改任何东西，可以用「分享面板」生成一条只读链接。
+            <div className="mt-3 space-y-2 text-sm text-[var(--gray)]">
+              <div>1. 「设置 → 分享面板」点「+ 新建分享」。</div>
+              <div>2. 勾选你想让对方看到的 Tab（总览 / 持仓 / 业绩 / 明细 / 变动 / 税务，可任意组合）。</div>
+              <div>3. 选要分享的账户（Combined / 单账户）和有效期（默认 30 天，可设永久）。</div>
+              <div>4. 系统生成一条形如 <code>https://moneychen.com/share/&lt;token&gt;</code> 的链接，复制给对方即可。</div>
+              <div>5. 不再想给对方看了？回这里点「删除」即时失效，对方刷新就看不到。</div>
+            </div>
+            <Tip>分享链接只能看，不能上传 / 修改 / 解绑 TG。即使对方拿到链接也无法登录你的账号。</Tip>
+          </Step>
+
+          <Step n={9} title="常见问题排查">
+            <div className="space-y-4 text-sm">
+              <div>
+                <div className="font-semibold text-black">Q1：自动同步报错「Query is invalid」/ 1014</div>
+                <div className="mt-1 text-[var(--gray)]">说明 Query ID 填错了。正常的 Query ID 是 7 位数字（如 <code>1485866</code>），在 IB 后台 <b>Performance & Reports → Flex Queries → Activity Flex Query</b> 列表里复制。容易混淆的是「Reference Code」，那是你点 Run 之后才生成的临时下载凭证，不能填到这里。</div>
+              </div>
+              <div>
+                <div className="font-semibold text-black">Q2：自动同步报错「Token is invalid」/ 1015</div>
+                <div className="mt-1 text-[var(--gray)]">Token 错或过期。到 <b>Performance & Reports → Flex Web Service</b> 重新生成 Current Token，<b>Valid for IP Address 留空</b>，点 Save 后复制完整 token 重新保存到本站。</div>
+              </div>
+              <div>
+                <div className="font-semibold text-black">Q3：首页净值连续好几天不动</div>
+                <div className="mt-1 text-[var(--gray)]">先看 asOfDate 是不是周末或节假日 —— 美股闭市时盘中实时价不会更新，IB Flex 也只在交易日给数据。如果 asOfDate 已经超过 7 个工作日没动，多半是 Flex 自动同步失败了，去「设置 → IB 自动同步」看「最近同步状态」的报错信息。</div>
+              </div>
+              <div>
+                <div className="font-semibold text-black">Q4：货币显示不对</div>
+                <div className="mt-1 text-[var(--gray)]">本站基础货币默认跟随你 IB 账户的 base currency（多数美股账户是 USD）。可以在「设置 → 账户与货币」里改成你想要的，改完会自动重生 dashboard。首页右上角的 USD / CNH 切换 toggle 是显示层换算，不影响实际存储数据。</div>
+              </div>
+              <div>
+                <div className="font-semibold text-black">Q5：持仓页同一只股票出现好几行</div>
+                <div className="mt-1 text-[var(--gray)]">如果你 IB Flex Query 的 Open Positions 段勾了 Lot Detail，老版本会把 Summary + 每个 Lot 都列一遍。本站已修复（v1.1.1），刷新即可恢复成一行。</div>
+              </div>
+              <div>
+                <div className="font-semibold text-black">Q6：上传 XML 一直「上传中」很久</div>
+                <div className="mt-1 text-[var(--gray)]">大文件（10MB+）在国内带宽下需要 30 秒以上属正常。文件名下方会显示进度条与上传速度，可以观察是否在走数。如果一直 0% 不动，先检查网络，或换成「上传文件夹」分批传。</div>
+              </div>
+              <div>
+                <div className="font-semibold text-black">Q7：有多个 IB 子账户怎么看</div>
+                <div className="mt-1 text-[var(--gray)]">每上传一个新账号的 XML，左上角账户下拉就会多一项。<b>Combined</b> 是跨账户合并视图（持仓自动按币种折算去重，业绩按权重合并）。免费版默认只支持 1 个账号，超出会保留数据但下拉里看不到入口，需要联系管理员升档。</div>
+              </div>
+            </div>
+          </Step>
+
+          <Step n={10} title="最佳实践与注意事项">
             <ul className="list-disc space-y-1 pl-5 text-[var(--gray)]">
               <li><b>浏览器缓存</b>：如果更新了数据但页面没变化，尝试按 <code>Ctrl + F5</code>（Windows）或 <code>Cmd + Shift + R</code>（Mac）强制刷新。</li>
               <li><b>XML 格式</b>：请确保上传的是 IB 官方「Activity Statement」XML，而非 PDF 或 CSV。</li>

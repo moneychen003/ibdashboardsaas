@@ -5,11 +5,11 @@ import { api } from '../api';
 const TABS = [
   { id: 'status', label: '系统状态' },
   { id: 'upload', label: '导入数据' },
-  { id: 'share', label: '分享面板' },
-  { id: 'notifications', label: '通知与导出' },
   { id: 'ops', label: '数据运维' },
   { id: 'backups', label: '备份恢复' },
   { id: 'accounts', label: '账户与货币' },
+  { id: 'telegram', label: 'TG 机器人' },
+  { id: 'share', label: '分享面板' },
   { id: 'flex', label: 'IB 自动同步' },
   { id: 'market', label: '市场数据' },
   { id: 'guest', label: '游客权限' },
@@ -55,6 +55,326 @@ function useAdminConfig() {
   return { cfg, loading, fetchCfg, save };
 }
 
+
+function TelegramTab() {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [code, setCode] = useState(null);
+  const [codeExpiresAt, setCodeExpiresAt] = useState(null);
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  async function fetchStatus() {
+    setLoading(true);
+    try {
+      const d = await api.telegramStatus();
+      setStatus(d);
+    } catch (e) {
+      setStatus({ bindings: [], error: e.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { fetchStatus(); }, []);
+
+  async function generateCode() {
+    try {
+      const d = await api.telegramGenerateCode();
+      setCode(d.code);
+      setCodeExpiresAt(Date.now() + (d.expiresIn || 600) * 1000);
+    } catch (e) {
+      alert('生成失败: ' + e.message);
+    }
+  }
+
+  async function unbind(chatId) {
+    if (!confirm('确认解绑？')) return;
+    try {
+      await api.telegramUnbind(chatId);
+      await fetchStatus();
+    } catch (e) {
+      alert('解绑失败: ' + e.message);
+    }
+  }
+
+  async function toggleSub(chatId, current) {
+    try {
+      await api.telegramSubscription(chatId, !current);
+      await fetchStatus();
+    } catch (e) {
+      alert('切换失败: ' + e.message);
+    }
+  }
+
+  const botUsername = status?.botUsername || 'ibdashboard_bot';
+  const secondsLeft = codeExpiresAt ? Math.max(0, Math.floor((codeExpiresAt - now) / 1000)) : 0;
+  const codeExpired = code && secondsLeft <= 0;
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-[var(--light-gray)] p-4">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-base font-semibold">Telegram 机器人 · @{botUsername}</span>
+          <a
+            href={`https://t.me/${botUsername}`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 rounded-lg border border-[#229ED9] bg-[#229ED9] px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 whitespace-nowrap"
+          >
+            打开 Telegram →
+          </a>
+        </div>
+        <div className="text-sm text-[var(--gray)]">
+          绑定后可在 Telegram 查询净值、持仓、成本、交易等数据，也可订阅每日净值播报。
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[var(--light-gray)] p-4">
+        <div className="mb-3 text-sm font-semibold">1. 生成绑定码</div>
+        {!code && (
+          <button
+            onClick={generateCode}
+            className="rounded-lg border border-black bg-black px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-800"
+          >
+            生成 6 位绑定码
+          </button>
+        )}
+        {code && !codeExpired && (
+          <div>
+            <div className="mb-2 flex items-center gap-3">
+              <span className="font-mono text-3xl font-bold tracking-widest">{code}</span>
+              <span className="text-xs text-[var(--gray)]">
+                {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')} 后失效
+              </span>
+            </div>
+            <div className="text-sm leading-relaxed text-[var(--gray)]">
+              打开 Telegram，搜索 <a className="font-mono text-black underline" href={`https://t.me/${botUsername}`} target="_blank" rel="noreferrer">@{botUsername}</a>
+              ，发送：
+            </div>
+            <div className="mt-1 rounded-md bg-[var(--lighter-gray)] px-3 py-2 font-mono text-sm">/bind {code}</div>
+            <button onClick={generateCode} className="mt-3 text-xs text-[var(--gray)] underline hover:text-black">重新生成</button>
+          </div>
+        )}
+        {code && codeExpired && (
+          <div>
+            <div className="mb-2 text-sm text-[var(--danger)]">绑定码已过期，请重新生成。</div>
+            <button
+              onClick={generateCode}
+              className="rounded-lg border border-black bg-black px-4 py-2 text-sm font-medium text-white"
+            >
+              重新生成
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-[var(--light-gray)] p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-sm font-semibold">2. 已绑定</div>
+          <button onClick={fetchStatus} className="text-xs text-[var(--gray)] underline hover:text-black">刷新</button>
+        </div>
+        {loading && <div className="text-sm text-[var(--gray)]">加载中...</div>}
+        {!loading && status?.bindings?.length === 0 && (
+          <div className="text-sm text-[var(--gray)]">还没有绑定任何 Telegram 账户。</div>
+        )}
+        {!loading && status?.bindings?.map((b) => (
+          <div key={b.chatId} className="mb-2 rounded-lg border border-[var(--lighter-gray)] p-3 last:mb-0">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-medium">
+                  {b.firstName || b.username || 'Telegram User'}
+                  {b.username && <span className="ml-1 text-sm text-[var(--gray)]">@{b.username}</span>}
+                </div>
+                <div className="text-xs text-[var(--gray)]">
+                  绑定于 {b.boundAt ? new Date(b.boundAt).toLocaleString('zh-CN') : '-'}
+                </div>
+              </div>
+              <button
+                onClick={() => unbind(b.chatId)}
+                className="rounded border border-[var(--light-gray)] px-2 py-1 text-xs text-[var(--danger)] hover:border-[var(--danger)]"
+              >
+                解绑
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2 text-xs">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!b.subscribedDaily}
+                  onChange={() => toggleSub(b.chatId, b.subscribedDaily)}
+                />
+                订阅每日净值播报（每天 22:00）
+              </label>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-[var(--light-gray)] p-4">
+        <div className="mb-2 text-sm font-semibold">可用命令</div>
+        <div className="space-y-1 text-xs font-mono leading-relaxed text-[var(--gray)]">
+          <div>/nav — 当前净值 + 今日盈亏</div>
+          <div>/holdings — Top 10 持仓</div>
+          <div>/cost AAPL — 查单标的成本</div>
+          <div>/trades — 最近交易</div>
+          <div>/pnl7 — 近 7 日盈亏</div>
+          <div>/tax — YTD 已实现</div>
+          <div>/sub — 订阅每日播报</div>
+          <div>/unsub — 取消订阅</div>
+          <div>/status — 绑定状态</div>
+          <div>/unbind — 解绑</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ShareTab() {
+  const [shares, setShares] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const ALL_TABS = [
+    { id: 'overview', label: '总览' },
+    { id: 'positions', label: '持仓' },
+    { id: 'performance', label: '业绩' },
+    { id: 'details', label: '明细' },
+    { id: 'changes', label: '变动' },
+    { id: 'tax', label: '税务' },
+  ];
+  const [allowed, setAllowed] = useState(['overview']);
+  const [accountId, setAccountId] = useState('combined');
+  const [expiresDays, setExpiresDays] = useState(30);
+
+  async function fetchList() {
+    setLoading(true);
+    try {
+      const d = await api.listShares();
+      setShares(d.shares || []);
+    } catch (e) {
+      setMsg('加载失败：' + e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { fetchList(); }, []);
+
+  function toggleTab(id) {
+    setAllowed((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
+  }
+
+  async function create() {
+    if (!allowed.length) {
+      setMsg('至少勾选一个 tab');
+      return;
+    }
+    setCreating(true);
+    setMsg('');
+    try {
+      await api.createShare({ allowed_tabs: allowed, account_id: accountId, expires_days: Number(expiresDays) || 0 });
+      await fetchList();
+      setMsg('已创建分享链接');
+    } catch (e) {
+      setMsg('创建失败：' + e.message);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function remove(token) {
+    if (!confirm('确认删除该分享链接？')) return;
+    try {
+      await api.deleteShare(token);
+      await fetchList();
+    } catch (e) {
+      alert('删除失败：' + e.message);
+    }
+  }
+
+  function copyUrl(token) {
+    const url = `${window.location.origin}/share/${token}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setMsg('已复制：' + url);
+    }).catch(() => {
+      prompt('复制下方链接：', url);
+    });
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-[var(--light-gray)] p-4">
+        <div className="mb-2 text-base font-semibold">分享面板给朋友</div>
+        <div className="text-sm text-[var(--gray)]">
+          创建只读分享链接，访客通过链接可看到你勾选的页签。链接含到期时间（默认 30 天），可随时撤销。
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[var(--light-gray)] p-4">
+        <div className="mb-3 text-sm font-semibold">1. 勾选访客可看的页</div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {ALL_TABS.map((t) => (
+            <label key={t.id} className="flex cursor-pointer items-center gap-2 rounded-md border border-[var(--lighter-gray)] px-3 py-2 hover:border-black">
+              <input type="checkbox" checked={allowed.includes(t.id)} onChange={() => toggleTab(t.id)} className="h-4 w-4 accent-black" />
+              <span className="text-sm">{t.label}</span>
+            </label>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+          <label className="flex items-center gap-2">账户
+            <input value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-32 rounded border border-[var(--light-gray)] px-2 py-1" placeholder="combined" />
+          </label>
+          <label className="flex items-center gap-2">有效天数
+            <input type="number" min="0" value={expiresDays} onChange={(e) => setExpiresDays(e.target.value)} className="w-20 rounded border border-[var(--light-gray)] px-2 py-1" />
+            <span className="text-xs text-[var(--gray)]">(0 = 永久)</span>
+          </label>
+        </div>
+        <button onClick={create} disabled={creating} className="mt-3 rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+          {creating ? '创建中...' : '生成分享链接'}
+        </button>
+        {msg && <div className="mt-2 text-xs text-[var(--gray)]">{msg}</div>}
+      </div>
+
+      <div className="rounded-xl border border-[var(--light-gray)] p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-sm font-semibold">2. 已创建的分享链接</div>
+          <button onClick={fetchList} className="text-xs text-[var(--gray)] underline">刷新</button>
+        </div>
+        {loading && <div className="text-sm text-[var(--gray)]">加载中...</div>}
+        {!loading && shares.length === 0 && <div className="text-sm text-[var(--gray)]">暂无分享链接</div>}
+        {shares.map((s) => (
+          <div key={s.token} className="mb-3 rounded-lg border border-[var(--lighter-gray)] p-3 last:mb-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="font-mono text-xs break-all">{window.location.origin}/share/{s.token}</div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--gray)]">
+                  <span>账户：{s.account_id}</span>
+                  <span>·</span>
+                  <span>tab：{(s.allowed_tabs || []).join(', ')}</span>
+                  <span>·</span>
+                  <span>到期：{s.expires_at ? new Date(s.expires_at).toLocaleDateString('zh-CN') : '永久'}</span>
+                  {!s.is_active && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">已失效</span>}
+                </div>
+              </div>
+              <div className="flex flex-shrink-0 flex-col gap-1">
+                <button onClick={() => copyUrl(s.token)} className="rounded border border-[var(--light-gray)] px-2 py-1 text-xs hover:border-black">复制</button>
+                <button onClick={() => remove(s.token)} className="rounded border border-[var(--light-gray)] px-2 py-1 text-xs text-[var(--danger)] hover:border-[var(--danger)]">删除</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPanel() {
   const settingsOpen = useDashboardStore((s) => s.settingsOpen);
   const toggleSettings = useDashboardStore((s) => s.toggleSettings);
@@ -67,17 +387,17 @@ export default function SettingsPanel() {
   return (
     <>
       <div className="fixed inset-0 z-[998] bg-black/20" onClick={toggleSettings} />
-      <aside className="fixed right-0 top-16 z-[999] h-[calc(100vh-64px)] w-full sm:w-[560px] overflow-hidden border-l border-[var(--light-gray)] bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.1)]">
+      <aside className="fixed right-0 top-16 bottom-0 z-[999] flex flex-col w-full sm:w-[560px] overflow-hidden border-l border-[var(--light-gray)] bg-white shadow-[-10px_0_40px_rgba(0,0,0,0.1)]">
         <div className="flex items-center justify-between border-b border-[var(--light-gray)] px-5 py-4">
           <span className="font-semibold">系统设置</span>
           <button onClick={toggleSettings} className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--light-gray)] bg-white text-lg">×</button>
         </div>
-        <div className="flex gap-1 overflow-x-auto border-b border-[var(--light-gray)] px-4 py-2">
-          {TABS.filter((t) => isAdmin || !['ops','backups','market','guest','cleanup','webhook'].includes(t.id)).map((t) => (
+        <div className="flex flex-wrap gap-1 border-b border-[var(--light-gray)] px-4 py-2">
+          {TABS.filter((t) => isAdmin || !['ops','backups','guest','cleanup','webhook'].includes(t.id)).map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
-              className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition ${
+              className={`whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition ${
                 activeTab === t.id ? 'bg-black text-white' : 'text-[var(--gray)] hover:bg-[var(--lighter-gray)]'
               }`}
             >
@@ -85,14 +405,14 @@ export default function SettingsPanel() {
             </button>
           ))}
         </div>
-        <div className="h-[calc(100vh-64px-120px)] overflow-y-auto p-5">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 pb-24 md:pb-5">
           {activeTab === 'status' && <StatusTab />}
           {activeTab === 'upload' && <UploadTab />}
-          {activeTab === 'share' && <ShareTab />}
-          {activeTab === 'notifications' && <NotificationsTab />}
           {activeTab === 'ops' && <OpsTab />}
           {activeTab === 'backups' && <BackupsTab />}
           {activeTab === 'accounts' && <AccountsTab />}
+          {activeTab === 'telegram' && <TelegramTab />}
+          {activeTab === 'share' && <ShareTab />}
           {activeTab === 'flex' && <FlexTab />}
           {activeTab === 'guest' && <GuestTab isAdmin={isAdmin} />}
           {activeTab === 'cleanup' && <CleanupTab />}
@@ -1103,499 +1423,6 @@ function UploadTab() {
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         💡 建议一次性把历史 XML 都传完，数据越完整，收益率、持仓归因、交易排名等高级分析就越准确。上传完成后页面会自动刷新。
       </div>
-    </div>
-  );
-}
-
-// ---------- Share Tab ----------
-const SHARE_TAB_OPTIONS = [
-  { key: 'overview', label: '📊 总览' },
-  { key: 'positions', label: '💼 持仓' },
-  { key: 'performance', label: '📈 业绩' },
-  { key: 'details', label: '📝 明细' },
-  { key: 'changes', label: '📋 变动' },
-];
-
-function ShareTab() {
-  const accounts = useDashboardStore((s) => s.accounts);
-  const [selectedTabs, setSelectedTabs] = useState(['overview']);
-  const [selectedAccount, setSelectedAccount] = useState('combined');
-  const [expiresDays, setExpiresDays] = useState(30);
-  const [shares, setShares] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [copiedToken, setCopiedToken] = useState(null);
-
-  const fetchShares = async () => {
-    setLoading(true);
-    try {
-      const data = await api.listShares();
-      setShares(data.shares || []);
-    } catch (e) {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchShares();
-  }, []);
-
-  const handleCreate = async () => {
-    if (selectedTabs.length === 0) return;
-    setCreating(true);
-    try {
-      const res = await api.createShare({
-        allowed_tabs: selectedTabs,
-        account_id: selectedAccount,
-        expires_days: parseInt(expiresDays) || 30,
-      });
-      setShares((prev) => [res, ...prev]);
-    } catch (e) {
-      alert('创建失败: ' + (e.message || '未知错误'));
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleDelete = async (token) => {
-    if (!confirm('确定删除该分享链接？')) return;
-    try {
-      await api.deleteShare(token);
-      setShares((prev) => prev.filter((s) => s.token !== token));
-    } catch (e) {
-      alert('删除失败');
-    }
-  };
-
-  const copyLink = (token, url) => {
-    const fullUrl = window.location.origin + url;
-    navigator.clipboard.writeText(fullUrl).then(() => {
-      setCopiedToken(token);
-      setTimeout(() => setCopiedToken(null), 2000);
-    });
-  };
-
-  const nonCombinedAccounts = accounts.filter((a) => a.alias !== 'combined');
-
-  return (
-    <div className="space-y-5">
-      <div className="rounded-lg border border-[var(--light-gray)] p-4">
-        <div className="mb-3 text-sm font-semibold">创建新的分享链接</div>
-        <div className="mb-3">
-          <div className="mb-1 text-xs text-[var(--gray)]">选择要展示的页面</div>
-          <div className="flex flex-wrap gap-2">
-            {SHARE_TAB_OPTIONS.map((t) => (
-              <label key={t.key} className="flex cursor-pointer items-center gap-1.5 rounded-md border border-[var(--light-gray)] px-3 py-1.5 text-sm hover:bg-[var(--lighter-gray)]">
-                <input
-                  type="checkbox"
-                  checked={selectedTabs.includes(t.key)}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedTabs((prev) => [...prev, t.key]);
-                    } else {
-                      setSelectedTabs((prev) => prev.filter((k) => k !== t.key));
-                    }
-                  }}
-                  className="h-4 w-4"
-                />
-                {t.label}
-              </label>
-            ))}
-          </div>
-        </div>
-        <div className="mb-3">
-          <div className="mb-1 text-xs text-[var(--gray)]">选择要分享的账户</div>
-          <select
-            value={selectedAccount}
-            onChange={(e) => setSelectedAccount(e.target.value)}
-            className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
-          >
-            <option value="combined">全部账户 (combined)</option>
-            {nonCombinedAccounts.map((a) => (
-              <option key={a.alias} value={a.alias}>{a.label || a.alias}</option>
-            ))}
-          </select>
-        </div>
-        <div className="mb-3">
-          <div className="mb-1 text-xs text-[var(--gray)]">有效期（天）</div>
-          <select
-            value={expiresDays}
-            onChange={(e) => setExpiresDays(e.target.value)}
-            className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
-          >
-            <option value={7}>7 天</option>
-            <option value={30}>30 天</option>
-            <option value={90}>90 天</option>
-            <option value={365}>1 年</option>
-            <option value={0}>永久有效</option>
-          </select>
-        </div>
-        <button
-          onClick={handleCreate}
-          disabled={creating || selectedTabs.length === 0}
-          className="w-full rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {creating ? '创建中...' : '生成分享链接'}
-        </button>
-      </div>
-
-      <div>
-        <div className="mb-2 text-sm font-semibold">已创建的链接</div>
-        {loading ? (
-          <div className="text-sm text-[var(--gray)]">加载中...</div>
-        ) : shares.length === 0 ? (
-          <div className="text-sm text-[var(--gray)]">暂无分享链接</div>
-        ) : (
-          <div className="space-y-2">
-            {shares.map((s) => (
-              <div key={s.token} className={`rounded-lg border p-3 ${s.is_active ? 'border-[var(--light-gray)]' : 'border-red-200 bg-red-50 opacity-60'}`}>
-                <div className="flex items-center justify-between">
-                  <div className="text-sm">
-                    <span className="font-medium">{s.account_id}</span>
-                    <span className="ml-2 text-xs text-[var(--gray)]">
-                      {s.allowed_tabs?.map((t) => SHARE_TAB_OPTIONS.find((o) => o.key === t)?.label || t).join(' · ')}
-                    </span>
-                  </div>
-                  <button onClick={() => handleDelete(s.token)} className="text-xs text-red-500 hover:text-red-700">删除</button>
-                </div>
-                <div className="mt-1 flex items-center gap-2">
-                  <input
-                    readOnly
-                    value={window.location.origin + s.share_url}
-                    className="flex-1 rounded border border-[var(--light-gray)] px-2 py-1 text-xs"
-                  />
-                  <button
-                    onClick={() => copyLink(s.token, s.share_url)}
-                    className="rounded border border-[var(--light-gray)] px-2 py-1 text-xs hover:bg-[var(--lighter-gray)]"
-                  >
-                    {copiedToken === s.token ? '已复制' : '复制'}
-                  </button>
-                </div>
-                <div className="mt-1 text-xs text-[var(--gray)]">
-                  {s.is_active ? `有效期至: ${s.expires_at ? new Date(s.expires_at).toLocaleString('zh-CN') : '永久'}` : '已过期'}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-// ---------- Notifications & Export Tab ----------
-function NotificationsTab() {
-  const [settings, setSettings] = useState({
-    telegram_bot_token: '',
-    telegram_chat_id: '',
-    report_schedule: 'none',
-    option_alert_days: [7, 3, 1],
-  });
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const accounts = useDashboardStore((s) => s.accounts);
-
-  useEffect(() => {
-    setLoading(true);
-    api.userSettingsGet()
-      .then((data) => {
-        setSettings({
-          telegram_bot_token: data.telegram_bot_token || '',
-          telegram_chat_id: data.telegram_chat_id || '',
-          report_schedule: data.report_schedule || 'none',
-          option_alert_days: data.option_alert_days || [7, 3, 1],
-        });
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await api.userSettingsSave({
-        telegram_bot_token: settings.telegram_bot_token,
-        telegram_chat_id: settings.telegram_chat_id,
-        report_schedule: settings.report_schedule,
-        option_alert_days: settings.option_alert_days,
-      });
-      alert('保存成功');
-    } catch (e) {
-      alert('保存失败: ' + (e.message || '未知错误'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleTest = async () => {
-    setTesting(true);
-    try {
-      await api.userTestTelegram();
-      alert('测试消息已发送，请检查 Telegram');
-    } catch (e) {
-      alert('发送失败: ' + (e.message || '未知错误'));
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  const toggleAlertDay = (day) => {
-    setSettings((prev) => {
-      const has = prev.option_alert_days.includes(day);
-      return {
-        ...prev,
-        option_alert_days: has
-          ? prev.option_alert_days.filter((d) => d !== day)
-          : [...prev.option_alert_days, day].sort((a, b) => a - b),
-      };
-    });
-  };
-
-  const currentAccount = accounts.find((a) => a.alias !== 'combined')?.alias || 'combined';
-
-  return (
-    <div className="space-y-5">
-      {/* Telegram Settings */}
-      <div className="rounded-lg border border-[var(--light-gray)] p-4">
-        <div className="mb-3 text-sm font-semibold">Telegram 通知</div>
-        {loading ? (
-          <div className="text-sm text-[var(--gray)]">加载中...</div>
-        ) : (
-          <div className="space-y-3">
-            <div>
-              <div className="mb-1 text-xs text-[var(--gray)]">Bot Token</div>
-              <input
-                type="text"
-                value={settings.telegram_bot_token}
-                onChange={(e) => setSettings((p) => ({ ...p, telegram_bot_token: e.target.value }))}
-                placeholder="123456789:ABCdef..."
-                className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
-              />
-              <div className="mt-1 text-xs text-[var(--gray)]">
-                在 Telegram @BotFather 创建 Bot 后获取
-              </div>
-            </div>
-            <div>
-              <div className="mb-1 text-xs text-[var(--gray)]">Chat ID</div>
-              <input
-                type="text"
-                value={settings.telegram_chat_id}
-                onChange={(e) => setSettings((p) => ({ ...p, telegram_chat_id: e.target.value }))}
-                placeholder="例如: 123456789"
-                className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
-              />
-              <div className="mt-1 text-xs text-[var(--gray)]">
-                给 Bot 发送任意消息后，访问 https://api.telegram.org/bot&lt;Token&gt;/getUpdates 获取 chat id
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {saving ? '保存中...' : '保存'}
-              </button>
-              <button
-                onClick={handleTest}
-                disabled={testing || !settings.telegram_bot_token || !settings.telegram_chat_id}
-                className="rounded-lg border border-[var(--light-gray)] px-3 py-2 text-sm hover:border-black disabled:opacity-50"
-              >
-                {testing ? '发送中...' : '发送测试消息'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Report Schedule */}
-      <div className="rounded-lg border border-[var(--light-gray)] p-4">
-        <div className="mb-3 text-sm font-semibold">定期报告</div>
-        <div className="mb-3">
-          <div className="mb-1 text-xs text-[var(--gray)]">推送频率</div>
-          <select
-            value={settings.report_schedule}
-            onChange={(e) => setSettings((p) => ({ ...p, report_schedule: e.target.value }))}
-            className="w-full rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
-          >
-            <option value="none">关闭</option>
-            <option value="weekly">每周</option>
-            <option value="monthly">每月</option>
-          </select>
-        </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
-      </div>
-
-      {/* Option Alerts */}
-      <div className="rounded-lg border border-[var(--light-gray)] p-4">
-        <div className="mb-3 text-sm font-semibold">期权到期提醒</div>
-        <div className="mb-3">
-          <div className="mb-1 text-xs text-[var(--gray)]">提前几天提醒（可多选）</div>
-          <div className="flex flex-wrap gap-2">
-            {[1, 3, 7, 14, 30].map((day) => (
-              <label
-                key={day}
-                className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm ${
-                  settings.option_alert_days.includes(day)
-                    ? 'border-black bg-black text-white'
-                    : 'border-[var(--light-gray)] hover:bg-[var(--lighter-gray)]'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={settings.option_alert_days.includes(day)}
-                  onChange={() => toggleAlertDay(day)}
-                  className="hidden"
-                />
-                {day} 天
-              </label>
-            ))}
-          </div>
-        </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {saving ? '保存中...' : '保存'}
-        </button>
-      </div>
-
-      {/* Data Export */}
-      <div className="rounded-lg border border-[var(--light-gray)] p-4">
-        <div className="mb-3 text-sm font-semibold">数据导出 (CSV)</div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {[
-            { key: 'trades', label: '📈 交易记录' },
-            { key: 'dividends', label: '💰 股息记录' },
-            { key: 'positions', label: '💼 持仓明细' },
-            { key: 'nav', label: '📊 净值历史' },
-          ].map((item) => (
-            <a
-              key={item.key}
-              href={api.userExportUrl(item.key, currentAccount)}
-              className="rounded-lg border border-[var(--light-gray)] px-3 py-2 text-center text-sm hover:border-black hover:bg-black hover:text-white"
-            >
-              {item.label}
-            </a>
-          ))}
-        </div>
-      </div>
-
-      <BenchmarkManager />
-    </div>
-  );
-}
-
-function BenchmarkManager() {
-  const [benchmarks, setBenchmarks] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newTicker, setNewTicker] = useState('');
-
-  useEffect(() => {
-    setLoading(true);
-    api.userBenchmarksGet()
-      .then((data) => setBenchmarks(data.benchmarks || []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await api.userBenchmarksSave({ benchmarks });
-      alert('保存成功');
-    } catch (e) {
-      alert('保存失败: ' + (e.message || '未知错误'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAdd = () => {
-    if (!newName.trim() || !newTicker.trim()) return;
-    setBenchmarks((prev) => [...prev, { name: newName.trim(), ticker: newTicker.trim().toUpperCase() }]);
-    setNewName('');
-    setNewTicker('');
-  };
-
-  const handleRemove = (idx) => {
-    setBenchmarks((prev) => prev.filter((_, i) => i !== idx));
-  };
-
-  return (
-    <div className="rounded-lg border border-[var(--light-gray)] p-4">
-      <div className="mb-3 text-sm font-semibold">自定义 Benchmark</div>
-      <div className="mb-2 text-xs text-[var(--gray)]">
-        添加自定义指数或股票作为业绩对比基准（通过 Yahoo Finance 获取数据）
-      </div>
-      {loading ? (
-        <div className="text-sm text-[var(--gray)]">加载中...</div>
-      ) : (
-        <div className="space-y-3">
-          {benchmarks.length > 0 && (
-            <div className="space-y-2">
-              {benchmarks.map((bm, i) => (
-                <div key={i} className="flex items-center justify-between rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm">
-                  <div>
-                    <span className="font-medium">{bm.name}</span>
-                    <span className="ml-2 text-xs text-[var(--gray)]">{bm.ticker}</span>
-                  </div>
-                  <button onClick={() => handleRemove(i)} className="text-xs text-red-500 hover:text-red-700">删除</button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="名称 (如: 比特币)"
-              className="flex-1 rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
-            />
-            <input
-              type="text"
-              value={newTicker}
-              onChange={(e) => setNewTicker(e.target.value)}
-              placeholder="Yahoo Ticker (如: BTC-USD)"
-              className="flex-1 rounded-md border border-[var(--light-gray)] px-3 py-2 text-sm"
-            />
-            <button
-              onClick={handleAdd}
-              disabled={!newName.trim() || !newTicker.trim()}
-              className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
-              添加
-            </button>
-          </div>
-
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="w-full rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {saving ? '保存中...' : '保存 Benchmark'}
-          </button>
-
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            💡 常用 Ticker: 沪深300 (000300.SS), 比特币 (BTC-USD), 黄金 (GC=F), 原油 (CL=F)
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -4,6 +4,26 @@ import { fmtCur, fmtDate, fmtNum } from '../../utils/format';
 import OrderExecutionPanel from '../OrderExecutionPanel';
 import WashSaleAlerts from '../WashSaleAlerts';
 
+function tradeKindTag(t) {
+  const codes = (t.notes || '').split(';').map((c) => c.trim());
+  if (codes.includes('A')) return { label: '指派', cls: 'bg-amber-100 text-amber-700' };
+  if (codes.includes('Ep')) return { label: '到期', cls: 'bg-slate-100 text-slate-600' };
+  if (codes.includes('Ex')) return { label: '行权', cls: 'bg-amber-100 text-amber-700' };
+  if (t.openCloseIndicator === 'O') return { label: '开仓', cls: 'bg-blue-100 text-blue-700' };
+  if (t.openCloseIndicator === 'C') return { label: '平仓', cls: 'bg-slate-100 text-slate-600' };
+  return null;
+}
+
+function OcTag({ trade }) {
+  const tag = tradeKindTag(trade);
+  if (!tag) return null;
+  return (
+    <span className={`ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${tag.cls}`}>
+      {tag.label}
+    </span>
+  );
+}
+
 function Card({ title, children }) {
   return (
     <div className="rounded-xl border border-[var(--light-gray)] p-6">
@@ -252,7 +272,7 @@ function TradeTable({ trades }) {
               <tr key={i} className="border-b border-[var(--lighter-gray)]">
                 <td className="py-2 pl-3">{fmtDate(t.tradeDate || t.date)}</td>
                 <td className="py-2 font-medium">{t.symbol}</td>
-                <td className="py-2">{t.buySell}</td>
+                <td className="py-2 whitespace-nowrap">{t.buySell}<OcTag trade={t} /></td>
                 <td className="py-2 text-right">{t.quantity}</td>
                 <td className="py-2 text-right">{fmtCur(t.tradePrice || 0)}</td>
                 <td className="py-2">{t.currency}</td>
@@ -653,6 +673,47 @@ function TransactionFeesTable({ fees }) {
   );
 }
 
+
+function DataQualityCard({ dq }) {
+  const tables = (dq && dq.tables) || [];
+  if (!tables.length) return <p className="text-sm text-[var(--gray)]">暂无数据质量信息</p>;
+  return (
+    <div>
+      <div className="mb-2 text-xs text-[var(--gray)]">数据快照生成时间 {dq.generatedAt || '-'}</div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[var(--light-gray)] text-left text-xs text-[var(--gray)]">
+              <th className="py-2">表</th>
+              <th className="py-2 text-right">行数</th>
+              <th className="py-2">最新日期</th>
+              <th className="py-2">状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tables.map((t) => (
+              <tr key={t.table} className="border-b border-[var(--lighter-gray)]">
+                <td className="py-2 font-mono text-xs">{t.table}</td>
+                <td className="py-2 text-right">{fmtNum(t.rowCount, 0)}</td>
+                <td className="py-2 text-xs">{t.latestDate || '—'}</td>
+                <td className="py-2 text-xs">
+                  {t.error ? (
+                    <span className="rounded bg-red-50 px-2 py-0.5 text-red-600">{t.error}</span>
+                  ) : t.rowCount > 0 ? (
+                    <span className="rounded bg-green-50 px-2 py-0.5 text-green-600">OK</span>
+                  ) : (
+                    <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-600">空</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function DetailsTab() {
   const data = useDashboardStore((s) => s.data);
   if (!data) return <div className="py-10 text-center text-[var(--gray)]">暂无数据</div>;
@@ -682,6 +743,9 @@ export default function DetailsTab() {
       </Card>
       <Card title="⚠️ 税务优化提醒">
         <WashSaleAlerts data={data} />
+      </Card>
+      <Card title="🛠️ 数据质量">
+        <DataQualityCard dq={data.dataQuality} />
       </Card>
     </div>
   );

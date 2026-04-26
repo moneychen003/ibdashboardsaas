@@ -1,0 +1,140 @@
+{
+  "currentVersion": "1.1.3",
+  "versions": [
+    {
+      "version": "1.1.3",
+      "date": "2026-04-26",
+      "title": "帮助页扩展：Telegram 机器人 + 分享 + 常见问题",
+      "summary": "把帮助页从 7 步扩展到 10 步，新增 Telegram 机器人完整命令清单与绑定流程、只读分享面板使用说明、7 个常见问题排查（Flex 错误码、净值不动、货币显示、多账户等）。",
+      "sections": [
+        {
+          "type": "feature",
+          "label": "新内容",
+          "items": [
+            "新增 Step 7「使用 Telegram 机器人查询账户」：绑定流程 + 9 条查询命令清单（/nav、/holdings、/cost、/trades、/pnl7、/tax、/sub、/status、/unbind）+ 每日 22:00 播报说明",
+            "新增 Step 8「生成只读分享面板」：手把手讲怎么生成可指定 Tab 与有效期的只读链接",
+            "新增 Step 9「常见问题排查」：7 个 Q&A，覆盖 Flex Query Invalid 1014 / Token Invalid 1015 / 首页净值不动 / 货币显示 / 持仓重复 / 上传慢 / 多账户合并视图等高频问题"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "1.1.2",
+      "date": "2026-04-26",
+      "title": "基础货币跟随用户设置 + 帮助页措辞清理",
+      "summary": "修复首页净值显示的基础货币被全局 config 锁死成 CNH、与用户在「账户与货币」里设置的货币（多数为 USD）不一致的问题；同时清理帮助页里描述的、普通用户实际看不到的几个管理员设置项。",
+      "sections": [
+        {
+          "type": "fix",
+          "label": "修复",
+          "items": [
+            "baseCurrency 不跟随用户偏好：dashboard 生成器之前优先读 config/server_config.json 里硬编码的 baseCurrency=CNH，无视用户在「账户与货币」里设置的 base_currency。结果 IB 给的 USD 数额（daily_nav.ending_value）被错标成 CNH 输出到前端，货币切换 toggle 出来的换算数也跟着错。本次改成优先读 user_profiles.base_currency → IB 账户实际货币 → 全局 config → USD 兜底。",
+            "所有 SaaS 用户的 dashboard 缓存已批量重生，下次刷新即可看到正确的 baseCurrency 与对应数值。",
+            "清理无前端 UI 调用的 /api/user/export 后端接口（trades/dividends/positions/nav 四个 CSV 导出路由），降低非 admin 用户被滥用的风险面。"
+          ]
+        },
+        {
+          "type": "ui",
+          "label": "界面",
+          "items": [
+            "帮助页「使用系统设置」一节：之前列了「数据运维 / 备份恢复 / 系统清理」等管理员专属 tab，普通用户读了帮助却在设置面板里找不到对应入口。本次改成只列普通用户实际能看到的 7 个 tab（系统状态 / 导入数据 / 账户与货币 / IB 自动同步 / 市场数据 / TG 机器人 / 分享面板）。"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "1.1.1",
+      "date": "2026-04-26",
+      "title": "修复持仓明细重复显示",
+      "summary": "修复部分用户在「持仓」页看到同一标的被重复列出多次（每条 quantity / markPrice 完全相同，仅未实现盈亏不同）的问题。根因为 IB Flex Query 在 OpenPositions 段同时输出 Summary 与 Lot 行，下游 JOIN 未过滤导致行被乘出。",
+      "sections": [
+        {
+          "type": "fix",
+          "label": "修复",
+          "items": [
+            "持仓明细：当 IB Flex Query 的 OpenPositions 段勾选了 Lot Detail（按批次输出），同一标的会被乘出 1+N 次（1 条 Summary + N 条 Lot 批次），现已在 dashboard 生成时按 levelOfDetail = SUMMARY 过滤，单标的恢复一行",
+            "组合视图（combined）：受同一根因影响，combined 持仓的 positionValue / fifoPnlUnrealized 此前会被批次行加总放大，本次修复后回归真实金额",
+            "已识别 4 名受影响用户的 dashboard 缓存已自动重生，下次刷新即可看到修正后的数据；其他用户不受影响"
+          ]
+        },
+        {
+          "type": "perf",
+          "label": "说明",
+          "items": [
+            "修复仅作用于持仓明细的 JOIN 查询，archive_open_position 仍保留 Lot 明细行供成本基价 / 持有期估算使用，不会影响其他面板",
+            "如果你之前为了避开此 bug 关闭了 IB Flex 的 Lot Detail，可以放心打开"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "date": "2026-04-26",
+      "title": "数据完整性提示",
+      "summary": "顶部新增黄色提示横幅：当检测到 IB Flex Query 时间窗口过短或部分 Sections 输出为空，导致佣金、交易明细等字段为 0 时，会主动提醒用户去 IB 后台调整 Period 与 Sections。",
+      "sections": [
+        {
+          "type": "feature",
+          "label": "新功能",
+          "items": [
+            "新增「数据完整性提示」横幅：当检测到有持仓但 archive_trade=0 / 佣金明细为空 / Flex 窗口 ≤ 7 天时，所有 tab 顶部会显示一条黄色提示，并给出修改 Flex Query 的具体步骤",
+            "提示横幅会展示当前 Flex 时间窗口、持仓 / 交易 / 佣金明细 / 资金报表的条数，便于用户快速定位是哪部分缺失",
+            "横幅可点 × 在本次会话内关闭；下次进入仍会重新检测"
+          ]
+        },
+        {
+          "type": "fix",
+          "label": "修复",
+          "items": [
+            "修复部分用户「佣金信息显示为 0」的问题：根因在 IB Flex Query 把 Period 设成 Last 1 Calendar Day，当日没有交易时 Trades / UnbundledCommissionDetails 等 sections 全空。本版本通过新增的提示横幅引导用户把 Period 改为 Year to Date，可一键自愈"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-04-25",
+      "title": "数据准确性修复 + 税务 / 期权归因 / 闲置现金 新模块",
+      "summary": "首个正式版本，修复多处历史数据口径问题，新增税务估算、期权 EAE 归因、闲置现金机会成本面板。",
+      "sections": [
+        {
+          "type": "fix",
+          "label": "修复",
+          "items": [
+            "业绩摘要「已实现盈亏」此前两年都是 0（IB Flex 的 realized 字段长期未填），改为从 MTDYTD 表读取 YTD 实际值并拆分长/短期",
+            "「净入金」此前用 TWR 反推产生虚高 86 倍的外部现金流（$17M vs 真实 $197K），改用 archive_change_in_nav 的显式字段聚合；连带 TWR/MWR 曲线、投入本金全部校准",
+            "变动 tab「近期卖出盈亏分析」此前因 KeyError 被吞成空列表，现在能完整显示近 30 天的卖出记录与长/短期盈亏",
+            "SLB 借券收入面板此前因 NoneType 取值错误被吞空，现能正确显示月度利息 / 按标的 yield / 当前开放合约",
+            "「近 7 日盈亏」新增 Flex 五列口径（mtm + realized + 股息 + 利息 + 佣金）并列显示，差额暴露汇率翻译与未实现变动"
+          ]
+        },
+        {
+          "type": "feature",
+          "label": "新功能",
+          "items": [
+            "新 tab「税务」：已实现 YTD 长/短期拆分 + 按持仓最早买入估算未实现长/短期 + 4 档税率档位（中国籍 / 美籍 22% / 32% / 37%）实时预估税额",
+            "「期权 EAE 归因」卡片（业绩 tab）：Assignment / Expiration / Exercise / Sell 事件聚合 + 按 underlying Top 10 + 最近事件列表",
+            "「闲置现金机会成本」卡片（业绩 tab）：IB 分层利息按月分币种聚合，对比 SGOV 4.8% 年化",
+            "「数据质量」面板（明细 tab 尾）：19 张关键表的条数 + 最新日期 + OK/空/异常状态",
+            "MTM 绩效表加「按金额 / 按时间」排序切换"
+          ]
+        },
+        {
+          "type": "perf",
+          "label": "性能",
+          "items": [
+            "Nginx 全局开启 gzip，API JSON 下载体积压缩约 86%（overview 接口 526KB → 73KB）"
+          ]
+        },
+        {
+          "type": "ui",
+          "label": "界面",
+          "items": [
+            "移动端底部导航改为可横向滑动，容纳更多 tab",
+            "每次发版后 顶栏会显示「新版本」红点，点「v1.0.0」查看完整更新日志"
+          ]
+        }
+      ]
+    }
+  ]
+}

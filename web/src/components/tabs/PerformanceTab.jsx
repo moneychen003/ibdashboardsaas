@@ -22,11 +22,12 @@ function Card({ title, children }) {
   );
 }
 
-function Stat({ label, value, colorClass = '' }) {
+function Stat({ label, value, colorClass = '', sub = null }) {
   return (
     <div className="rounded-xl border border-[var(--light-gray)] p-4">
       <div className="mb-1 text-xs text-[var(--gray)]">{label}</div>
       <div className={`text-xl font-bold ${colorClass}`}>{value}</div>
+      {sub && <div className="mt-1 text-xs text-[var(--gray)]">{sub}</div>}
     </div>
   );
 }
@@ -233,23 +234,15 @@ function BenchmarkSummary({ data }) {
     return ((lastPrice / firstPrice) - 1) * 100;
   }
 
-  const BENCHMARK_COLORS = ['#6366f1', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
-  const BENCHMARK_LABELS = { 'SP500': '标普500', 'HSI': '恒生指数', 'CSI300': '沪深300', 'N225': '日经225', 'STI': '海峡指数', 'NASDAQ': '纳斯达克' };
+  const qqqTotal = getBenchmarkTotal('QQQ');
+  const spTotal = getBenchmarkTotal('SP500');
 
-  const benchmarkKeys = Object.keys(data.benchmarks || {}).filter((k) => k !== 'accountId');
-  const benchmarkTotals = {};
-  const benchmarkMaps = {};
-  const benchmarkFirsts = {};
-
-  benchmarkKeys.forEach((key) => {
-    benchmarkTotals[key] = getBenchmarkTotal(key);
-    const bmData = data.benchmarks[key];
-    const first = bmData?.find((r) => r.date <= labels[0])?.price || bmData?.[0]?.price;
-    benchmarkFirsts[key] = first;
-    const map = {};
-    (bmData || []).forEach((r) => (map[r.date] = r.price));
-    benchmarkMaps[key] = map;
-  });
+  const qqqMap = {};
+  const spMap = {};
+  const qqqFirst = data.benchmarks?.QQQ?.find((r) => r.date <= labels[0])?.price || data.benchmarks?.QQQ?.[0]?.price;
+  const spFirst = data.benchmarks?.SP500?.find((r) => r.date <= labels[0])?.price || data.benchmarks?.SP500?.[0]?.price;
+  (data.benchmarks?.QQQ || []).forEach((r) => (qqqMap[r.date] = r.price));
+  (data.benchmarks?.SP500 || []).forEach((r) => (spMap[r.date] = r.price));
 
   const echartsSeries = [
     {
@@ -264,22 +257,31 @@ function BenchmarkSummary({ data }) {
     },
   ];
 
-  benchmarkKeys.forEach((key, idx) => {
-    if (benchmarkTotals[key] == null) return;
-    const color = BENCHMARK_COLORS[idx % BENCHMARK_COLORS.length];
-    const map = benchmarkMaps[key];
-    const first = benchmarkFirsts[key];
+  if (qqqTotal != null) {
     echartsSeries.push({
-      name: BENCHMARK_LABELS[key] || key,
+      name: 'QQQ',
       type: 'line',
-      data: labels.map((d) => { const p = map[d]; return first && p != null ? ((p / first) - 1) * 100 : null; }),
+      data: labels.map((d) => { const p = qqqMap[d]; return qqqFirst && p != null ? ((p / qqqFirst) - 1) * 100 : null; }),
       smooth: true,
       showSymbol: false,
       connectNulls: true,
-      lineStyle: { color, width: 2, type: 'dashed' },
+      lineStyle: { color: '#6366f1', width: 2, type: 'dashed' },
       z: 5,
     });
-  });
+  }
+
+  if (spTotal != null) {
+    echartsSeries.push({
+      name: '标普500',
+      type: 'line',
+      data: labels.map((d) => { const p = spMap[d]; return spFirst && p != null ? ((p / spFirst) - 1) * 100 : null; }),
+      smooth: true,
+      showSymbol: false,
+      connectNulls: true,
+      lineStyle: { color: '#ef4444', width: 2, type: 'dashed' },
+      z: 5,
+    });
+  }
 
   const option = {
     tooltip: {
@@ -313,32 +315,13 @@ function BenchmarkSummary({ data }) {
     series: echartsSeries,
   };
 
-  // Build stat cards dynamically
-  const statCards = [
-    <Stat key="me" label="我的账户" value={(myTotal >= 0 ? '+' : '') + fmtNum(myTotal, 2) + '%'} colorClass={myTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
-  ];
-  const firstBmKey = benchmarkKeys.find((k) => benchmarkTotals[k] != null);
-  benchmarkKeys.forEach((key) => {
-    if (benchmarkTotals[key] == null) return;
-    const label = BENCHMARK_LABELS[key] || key;
-    statCards.push(
-      <Stat key={key} label={label} value={(benchmarkTotals[key] >= 0 ? '+' : '') + fmtNum(benchmarkTotals[key], 2) + '%'} colorClass={benchmarkTotals[key] >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
-    );
-  });
-  if (firstBmKey && benchmarkTotals[firstBmKey] != null) {
-    const diff = myTotal - benchmarkTotals[firstBmKey];
-    statCards.push(
-      <Stat key="excess" label={`相对 ${BENCHMARK_LABELS[firstBmKey] || firstBmKey} 超额`} value={(diff >= 0 ? '+' : '') + fmtNum(diff, 2) + '%'} colorClass={diff >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
-    );
-  }
-
-  const cols = statCards.length <= 2 ? 2 : statCards.length <= 4 ? 4 : Math.min(statCards.length, 6);
-  const gridClass = `grid-cols-2 gap-3 sm:grid-cols-${Math.min(cols, 4)}`;
-
   return (
     <Card title="基准收益对比">
-      <div className={`mb-4 grid ${gridClass}`}>
-        {statCards}
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="我的账户" value={(myTotal >= 0 ? '+' : '') + fmtNum(myTotal, 2) + '%'} colorClass={myTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
+        <Stat label="QQQ" value={qqqTotal != null ? (qqqTotal >= 0 ? '+' : '') + fmtNum(qqqTotal, 2) + '%' : '--'} colorClass={qqqTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
+        <Stat label="标普500" value={spTotal != null ? (spTotal >= 0 ? '+' : '') + fmtNum(spTotal, 2) + '%' : '--'} colorClass={spTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
+        <Stat label="相对 QQQ 超额" value={qqqTotal != null ? (myTotal - qqqTotal >= 0 ? '+' : '') + fmtNum(myTotal - qqqTotal, 2) + '%' : '--'} colorClass={qqqTotal != null && myTotal - qqqTotal >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
       </div>
       <div className="chart-container" style={{ height: 220 }}>
         <ECharts option={option} style={{ height: 220 }} />
@@ -510,6 +493,176 @@ function FeeImpact({ data }) {
   );
 }
 
+
+function OptionEaeCard({ data }) {
+  const oe = data.optionEaeEvents || {};
+  const summary = oe.summary || {};
+  const byUnder = oe.byUnderlying || [];
+  const events = oe.events || [];
+  if (!events.length) return <p className="text-sm text-[var(--gray)]">暂无期权 EAE 事件</p>;
+  const txOrder = ['Sell_P', 'Sell_C', 'Sell_-', 'Assignment_P', 'Assignment_C', 'Expiration_P', 'Expiration_C', 'Exercise_P', 'Exercise_C', 'Buy_-'];
+  const txLabels = {
+    'Sell_P': '卖 PUT', 'Sell_C': '卖 CALL', 'Sell_-': '卖出',
+    'Assignment_P': 'PUT 被指派', 'Assignment_C': 'CALL 被指派',
+    'Expiration_P': 'PUT 到期废', 'Expiration_C': 'CALL 到期废',
+    'Exercise_P': 'PUT 行权', 'Exercise_C': 'CALL 行权',
+    'Buy_-': '买入（被指派后）',
+  };
+  const keys = Object.keys(summary).sort((a, b) => (txOrder.indexOf(a) + 1 || 99) - (txOrder.indexOf(b) + 1 || 99));
+  return (
+    <div className="space-y-4">
+      <div className="text-xs text-[var(--gray)]">共 {oe.totalEvents || events.length} 个事件</div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {keys.map((k) => {
+          const s = summary[k];
+          return (
+            <div key={k} className="rounded-lg border border-[var(--light-gray)] p-3">
+              <div className="mb-1 text-xs text-[var(--gray)]">{txLabels[k] || k}</div>
+              <div className="text-sm font-semibold">{s.count} 次</div>
+              <div className={`text-xs ${(s.totalMtm || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+                MTM {(s.totalMtm >= 0 ? '+' : '') + fmtCur(s.totalMtm)}
+              </div>
+              {s.totalProceeds !== 0 && (
+                <div className="text-xs text-[var(--gray)]">权利金 {fmtCur(s.totalProceeds)}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-semibold">按标的聚合 Top 10</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--light-gray)] text-left text-xs text-[var(--gray)]">
+                <th className="py-2">标的</th>
+                <th className="py-2 text-right">事件数</th>
+                <th className="py-2 text-right">净 MTM</th>
+                <th className="py-2 text-right">权利金收入</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byUnder.slice(0, 10).map((r) => (
+                <tr key={r.symbol} className="border-b border-[var(--lighter-gray)]">
+                  <td className="py-2 font-medium">{r.symbol}</td>
+                  <td className="py-2 text-right">{r.events}</td>
+                  <td className={`py-2 text-right ${r.netMtm >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+                    {r.netMtm >= 0 ? '+' : ''}{fmtCur(r.netMtm)}
+                  </td>
+                  <td className="py-2 text-right text-[var(--gray)]">{fmtCur(r.premiums)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-sm font-semibold">最近事件</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--light-gray)] text-left text-xs text-[var(--gray)]">
+                <th className="py-2">日期</th>
+                <th className="py-2">标的</th>
+                <th className="py-2">事件</th>
+                <th className="py-2">P/C</th>
+                <th className="py-2 text-right">行权价</th>
+                <th className="py-2">到期</th>
+                <th className="py-2 text-right">数量</th>
+                <th className="py-2 text-right">权利金</th>
+                <th className="py-2 text-right">MTM</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.slice(0, 30).map((e, i) => (
+                <tr key={i} className="border-b border-[var(--lighter-gray)]">
+                  <td className="py-2">{e.date}</td>
+                  <td className="py-2 font-medium">{e.symbol}</td>
+                  <td className="py-2">{txLabels[`${e.transactionType}_${e.putCall || '-'}`] || e.transactionType}</td>
+                  <td className="py-2">{e.putCall || '-'}</td>
+                  <td className="py-2 text-right">{e.strike != null ? fmtNum(e.strike, 2) : '-'}</td>
+                  <td className="py-2">{e.expiry || '-'}</td>
+                  <td className="py-2 text-right">{e.quantity}</td>
+                  <td className="py-2 text-right text-[var(--gray)]">{fmtCur(e.proceeds)}</td>
+                  <td className={`py-2 text-right ${e.mtmPnl >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+                    {(e.mtmPnl || 0) >= 0 ? '+' : ''}{fmtCur(e.mtmPnl || 0)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CashOpportunityCard({ data }) {
+  const co = data.cashOpportunity || {};
+  const months = co.monthly || [];
+  if (!months.length) return <p className="text-sm text-[var(--gray)]">暂无分层利息数据</p>;
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-lg border border-[var(--light-gray)] p-3">
+          <div className="mb-1 text-xs text-[var(--gray)]">累计 Credit（你收到的）</div>
+          <div className="text-lg font-bold text-[var(--success)]">{fmtCur(co.totalCredit)}</div>
+        </div>
+        <div className="rounded-lg border border-[var(--light-gray)] p-3">
+          <div className="mb-1 text-xs text-[var(--gray)]">累计 Debit（你付出的）</div>
+          <div className="text-lg font-bold text-[var(--danger)]">{fmtCur(co.totalDebit)}</div>
+        </div>
+        <div className="rounded-lg border border-[var(--light-gray)] p-3">
+          <div className="mb-1 text-xs text-[var(--gray)]">净利息</div>
+          <div className={`text-lg font-bold ${(co.totalNet || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+            {fmtCur(co.totalNet)}
+          </div>
+        </div>
+        <div className="rounded-lg border border-[var(--light-gray)] p-3">
+          <div className="mb-1 text-xs text-[var(--gray)]">参考年化 (SGOV)</div>
+          <div className="text-lg font-bold text-[var(--success)]">~4.8%</div>
+        </div>
+      </div>
+      {co.note && <div className="text-xs text-[var(--gray)]">{co.note}</div>}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[var(--light-gray)] text-left text-xs text-[var(--gray)]">
+              <th className="py-2">月份</th>
+              <th className="py-2 text-right">Credit</th>
+              <th className="py-2 text-right">Debit</th>
+              <th className="py-2 text-right">净额</th>
+              <th className="py-2">按币种</th>
+            </tr>
+          </thead>
+          <tbody>
+            {months.slice(0, 24).map((m) => (
+              <tr key={m.month} className="border-b border-[var(--lighter-gray)]">
+                <td className="py-2 font-medium">{m.month}</td>
+                <td className="py-2 text-right text-[var(--success)]">{fmtCur(m.monthCredit)}</td>
+                <td className="py-2 text-right text-[var(--danger)]">{fmtCur(m.monthDebit)}</td>
+                <td className={`py-2 text-right font-semibold ${(m.monthNet || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+                  {(m.monthNet >= 0 ? '+' : '') + fmtCur(m.monthNet)}
+                </td>
+                <td className="py-2 text-xs text-[var(--gray)]">
+                  {Object.entries(m.byCurrency || {}).map(([c, v]) => (
+                    <span key={c} className="mr-2">
+                      {c}: {fmtCur(v.credit + v.debit)}
+                      {v.principal > 0 && <span className="text-[var(--gray)]/70"> (本金 {fmtNum(v.principal, 0)} @ {fmtNum(v.rate, 2)}%)</span>}
+                    </span>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function PerformanceTab() {
   const data = useDashboardStore((s) => s.data);
   const currentNavRange = useDashboardStore((s) => s.currentNavRange);
@@ -544,7 +697,12 @@ export default function PerformanceTab() {
       </Card>
       <Card title="业绩摘要">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <Stat label="已实现盈亏" value={fmtCur(nav.realized || 0)} colorClass={(nav.realized || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
+          <Stat
+            label={`已实现盈亏${nav.realizedYtdAsOf ? ` YTD (${nav.realizedYtdAsOf})` : ''}`}
+            value={fmtCur(nav.realizedYtd != null ? nav.realizedYtd : (nav.realized || 0))}
+            colorClass={(nav.realizedYtd || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}
+            sub={nav.realizedYtd != null ? `长期 ${fmtCur(nav.realizedLtYtd || 0)} · 短期 ${fmtCur(nav.realizedStYtd || 0)}` : null}
+          />
           <Stat label="未实现变动" value={fmtCur(nav.changeInUnrealized || 0)} colorClass={(nav.changeInUnrealized || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
           <Stat label="MTM 本期" value={fmtCur(nav.mtm || 0)} colorClass={(nav.mtm || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'} />
           <Stat label="股息收入" value={fmtCur(nav.dividends || 0)} colorClass="text-[var(--success)]" />
@@ -936,14 +1094,48 @@ function CostBreakdownWaterfall({ costBreakdown }) {
 }
 
 function MtmPerformanceTable({ data }) {
-  const rows = (data.mtmPerformanceSummary || []).slice(0, 200);
+  const [page, setPage] = useState(1);
+  const [sortMode, setSortMode] = useState('abs'); // 'abs' | 'date'
+  const rawRows = data.mtmPerformanceSummary || [];
+  const rows = useMemo(() => {
+    if (sortMode === 'date') {
+      return [...rawRows].sort((a, b) => (b.reportDate || '').localeCompare(a.reportDate || ''));
+    }
+    return rawRows;
+  }, [rawRows, sortMode]);
   if (!rows.length) return <p className="text-sm text-[var(--gray)]">暂无 MTM 绩效数据</p>;
+
+  const PAGE_SIZE = 20;
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const currentRows = rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
   return (
-    <div className="overflow-x-auto">
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-xs text-[var(--gray)]">共 {rows.length} 条记录</div>
+        <div className="inline-flex overflow-hidden rounded-md border border-[var(--light-gray)] text-xs">
+          <button
+            type="button"
+            onClick={() => { setSortMode('abs'); setPage(1); }}
+            className={`px-2 py-1 font-medium transition ${sortMode === 'abs' ? 'bg-black text-white' : 'bg-white text-[var(--gray)] hover:text-black'}`}
+          >
+            按金额
+          </button>
+          <button
+            type="button"
+            onClick={() => { setSortMode('date'); setPage(1); }}
+            className={`px-2 py-1 font-medium transition border-l border-[var(--light-gray)] ${sortMode === 'date' ? 'bg-black text-white' : 'bg-white text-[var(--gray)] hover:text-black'}`}
+          >
+            按时间
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-[var(--light-gray)]">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--light-gray)] text-left text-xs text-[var(--gray)]">
-            <th className="py-2">报告日期</th>
+            <th className="py-2 pl-3">报告日期</th>
             <th className="py-2">标的</th>
             <th className="py-2">描述</th>
             <th className="py-2">类型</th>
@@ -951,13 +1143,13 @@ function MtmPerformanceTable({ data }) {
             <th className="py-2 text-right">期初未实现</th>
             <th className="py-2 text-right">佣金</th>
             <th className="py-2 text-right">合计</th>
-            <th className="py-2 text-right">含应计合计</th>
+            <th className="py-2 pr-3 text-right">含应计合计</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
+          {currentRows.map((r, i) => (
             <tr key={i} className="border-b border-[var(--lighter-gray)]">
-              <td className="py-2">{fmtDate(r.reportDate)}</td>
+              <td className="py-2 pl-3">{fmtDate(r.reportDate)}</td>
               <td className="py-2 font-medium">{r.symbol || '-'}</td>
               <td className="py-2 text-[var(--gray)]">{r.description || '-'}</td>
               <td className="py-2">{r.assetCategory || '-'}</td>
@@ -971,13 +1163,43 @@ function MtmPerformanceTable({ data }) {
               <td className={`py-2 text-right font-semibold ${(r.total || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
                 {fmtCur(r.total || 0)}
               </td>
-              <td className={`py-2 text-right ${(r.totalWithAccruals || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+              <td className={`py-2 pr-3 text-right ${(r.totalWithAccruals || 0) >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
                 {fmtCur(r.totalWithAccruals || 0)}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      </div>
+      {totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-between">
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={safePage === 1}
+            className="rounded border border-[var(--light-gray)] px-3 py-1 text-xs font-medium disabled:opacity-40 hover:border-black"
+          >
+            上一页
+          </button>
+          <span className="text-xs text-[var(--gray)]">
+            第 {safePage} / {totalPages} 页
+          </span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={safePage === totalPages}
+            className="rounded border border-[var(--light-gray)] px-3 py-1 text-xs font-medium disabled:opacity-40 hover:border-black"
+          >
+            下一页
+          </button>
+        </div>
+      )}
+
+      <Card title="期权 Exercise / Assignment / Expiration 归因">
+        <OptionEaeCard data={data} />
+      </Card>
+
+      <Card title="闲置现金机会成本">
+        <CashOpportunityCard data={data} />
+      </Card>
     </div>
   );
 }

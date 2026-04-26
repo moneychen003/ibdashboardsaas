@@ -9,55 +9,19 @@
   --light-gray: #e5e5e5;
   --lighter-gray: #f5f5f5;
   --white: #ffffff;
-  --success: #00c853;
-  --danger: #ff3d00;
+  --success: #16a34a;
+  --danger: #dc2626;
   --border-radius: 12px;
 }
 
-.dark {
-  --black: #f5f5f5;
-  --dark-gray: #e5e5e5;
-  --gray: #999999;
-  --light-gray: #333333;
-  --lighter-gray: #1a1a1a;
-  --white: #0a0a0a;
-  --success: #00e676;
-  --danger: #ff5252;
-}
-
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
   background: var(--white);
   color: var(--black);
   line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
-
-.dark body {
-  background: #0a0a0a;
-  color: #f5f5f5;
-}
-
-/* Override Tailwind utilities in dark mode */
-.dark .bg-white { background-color: #1a1a1a !important; }
-.dark .bg-black { background-color: #f5f5f5 !important; }
-.dark .text-white { color: #0a0a0a !important; }
-.dark .text-black { color: #f5f5f5 !important; }
-.dark .border-white { border-color: #1a1a1a !important; }
-.dark .border-black { border-color: #f5f5f5 !important; }
-
-/* Dark mode specific overrides */
-.dark .bg-amber-50 { background-color: #3d2e00 !important; }
-.dark .border-amber-200 { border-color: #665200 !important; }
-.dark .text-amber-900 { color: #ffd54f !important; }
-.dark .bg-amber-100 { background-color: #4d3b00 !important; }
-.dark .bg-red-50 { background-color: #3d0000 !important; }
-.dark .border-red-200 { border-color: #660000 !important; }
-.dark .text-red-700 { color: #ff5252 !important; }
-.dark .bg-green-50 { background-color: #003d00 !important; }
-.dark .text-green-600 { color: #00e676 !important; }
-.dark .text-green-500 { color: #00e676 !important; }
-.dark .text-blue-500 { color: #448aff !important; }
-.dark .text-amber-600 { color: #ffd54f !important; }
 
 .chart-container {
   height: 300px;
@@ -68,9 +32,13 @@ body {
   display: none !important;
 }
 
-/* ===== Mobile Global Optimizations ===== */
+/* Mobile global optimizations */
 @media (max-width: 767px) {
   .chart-container {
     height: 220px;
   }
 }
+
+/* 2026-04-25: 移动端水平滚动隐藏滚动条 */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

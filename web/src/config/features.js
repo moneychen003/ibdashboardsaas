@@ -18,6 +18,12 @@ export const FEATURES = {
     footerText: '扫码加入群聊，与志同道合的朋友一起交流',
     /** 二维码图片路径（请放到 web/public/ 目录下） */
     qrCodePath: '/qrcode.png',
+    /** 个人微信二维码路径 */
+    wechatPersonalPath: '/wechat_personal.png',
+    /** Telegram 群链接 */
+    telegramUrl: 'https://t.me/+ZPLVLJfV0lBkMzZl',
+    /** Discord 邀请链接 */
+    discordUrl: 'https://discord.gg/YbyAww7kzm',
     /** 品牌标签 */
     brandLabel: '官方社区',
     /** 弹窗标题 */

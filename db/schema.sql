@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     base_currency TEXT DEFAULT 'USD',
     fx_overrides JSONB DEFAULT '{}',
     retention_days INT DEFAULT 30,
-    max_accounts INT DEFAULT 1,
-    max_history_months INT DEFAULT 3,
+    max_accounts INT DEFAULT 99,
+    max_history_months INT DEFAULT 99999,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

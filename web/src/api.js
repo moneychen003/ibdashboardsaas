@@ -53,16 +53,55 @@ export const api = {
   me: () => fetchJson('/api/auth/me'),
 
   // Dashboard
-  accounts: (params = '') => fetchJson(`/api/accounts${params}`),
+  accounts: (params = '') => fetchJson('/api/accounts' + params),
   dashboard: (alias, params = '') => fetchJson(`/api/dashboard/${alias}${params}`),
   dashboardOverview: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/overview${params}`),
   dashboardPositions: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/positions${params}`),
   dashboardPerformance: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/performance${params}`),
   dashboardDetails: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/details${params}`),
   dashboardChanges: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/changes${params}`),
+  dashboardTax: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/tax${params}`),
+  dashboardChengji: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/chengji${params}`),
+  releaseNotes: () => fetchJson('/api/release-notes'),
+  telegramStatus: () => fetchJson('/api/telegram/status'),
+  telegramGenerateCode: () => fetchJson('/api/telegram/generate-code', { method: 'POST' }),
+  telegramUnbind: (chatId) => fetchJson('/api/telegram/unbind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId }) }),
+  telegramSubscription: (chatId, subscribed) => fetchJson('/api/telegram/subscription', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId, subscribed }) }),
+
+  // Share links
+  createShare: (data) => fetchJson('/api/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  listShares: () => fetchJson('/api/share'),
+  deleteShare: (token) => fetchJson(`/api/share/${token}`, { method: 'DELETE' }),
+  getShareMeta: (token) => fetch(`/api/share/${token}`).then(r => r.ok ? r.json() : Promise.reject(new Error('链接无效或已过期'))),
+  getShareSlice: (token, alias, slice) => fetch(`/api/share/${token}/dashboard/${alias}/${slice}`).then(r => r.ok ? r.json() : Promise.reject(new Error('该页未授权'))),
 
   // Upload
-  uploadXml: (formData) => fetchJson('/api/upload/xml', { method: 'POST', body: formData }),
+  uploadXml: (formData) => fetchJson('/api/upload/xml', { method: 'POST', body: formData, timeout: 600000 }),
+  uploadXmlWithProgress: (formData, onProgress) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/api/upload/xml`);
+    const t = getToken();
+    if (t) xhr.setRequestHeader('Authorization', `Bearer ${t}`);
+    xhr.timeout = 600000;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress({ loaded: e.loaded, total: e.total });
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)); } catch (err) { reject(new Error('Invalid JSON response')); }
+      } else {
+        if (xhr.status === 401) {
+          localStorage.removeItem('token');
+          if (t) window.location.href = '/login';
+        }
+        reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.ontimeout = () => reject(new Error('Request timeout'));
+    xhr.onabort = () => reject(new Error('Upload aborted'));
+    xhr.send(formData);
+  }),
   jobStatus: (jobId) => fetchJson(`/api/jobs/${jobId}`),
 
   // FlexQuery
@@ -127,25 +166,4 @@ export const api = {
   marketUpdate: () => fetchJson('/api/market/update', { method: 'POST' }),
   marketUpdateStatus: (jobId) => fetchJson(`/api/market/update/status/${jobId}`),
   marketTest: (source, apiKey) => fetchJson(`/api/market/test/${source}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: apiKey }) }),
-
-  // Share links
-  createShare: (data) => fetchJson('/api/share', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
-  listShares: () => fetchJson('/api/share'),
-  deleteShare: (token) => fetchJson(`/api/share/${token}`, { method: 'DELETE' }),
-  getShareConfig: (token) => fetchJson(`/api/share/${token}`),
-  shareDashboard: (token, alias) => fetchJson(`/api/share/${token}/dashboard/${alias}`),
-  shareDashboardSlice: (token, alias, slice) => fetchJson(`/api/share/${token}/dashboard/${alias}/${slice}`),
-
-  // User settings (Telegram / export)
-  userSettingsGet: () => fetchJson('/api/user/settings'),
-  userSettingsSave: (data) => fetchJson('/api/user/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
-  userTestTelegram: () => fetchJson('/api/user/test-telegram', { method: 'POST' }),
-  userExportUrl: (type, accountId = 'combined') => `/api/user/export/${type}?account_id=${encodeURIComponent(accountId)}`,
-
-  // Search
-  search: (q) => fetchJson(`/api/search?q=${encodeURIComponent(q)}`),
-
-  // Benchmarks
-  userBenchmarksGet: () => fetchJson('/api/user/benchmarks'),
-  userBenchmarksSave: (data) => fetchJson('/api/user/benchmarks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
 };

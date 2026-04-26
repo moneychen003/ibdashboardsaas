@@ -5,22 +5,24 @@ export default function CorporateActionTimeline({ data }) {
   if (!events.length) return <div className="text-sm text-[var(--gray)]">暂无公司行动记录</div>;
 
   return (
-    <div className="space-y-3">
-      <div className="text-sm font-semibold">公司行动</div>
-      <div className="space-y-2">
-        {events.map((e, i) => (
-          <div key={i} className="flex items-start gap-3 rounded border border-[var(--light-gray)] p-2 text-sm">
-            <div className="w-20 shrink-0 text-xs text-[var(--gray)]">{e.date}</div>
-            <div className="flex-1">
-              <div className="font-medium">{e.symbol}</div>
-              <div className="text-xs text-[var(--gray)]">{e.action}</div>
-            </div>
-            <div className="text-right text-xs">
-              {e.amount != null && <div>影响: {fmtNum(e.amount)}</div>}
-            </div>
+    <div className="space-y-2">
+      {events.map((e, i) => (
+        <div
+          key={i}
+          className="grid grid-cols-[110px_minmax(0,1fr)_auto] items-start gap-4 rounded border border-[var(--light-gray)] p-3 text-sm"
+        >
+          <div className="font-mono text-xs text-[var(--gray)] whitespace-nowrap overflow-hidden text-ellipsis" title={e.date}>
+            {e.date}
           </div>
-        ))}
-      </div>
+          <div className="min-w-0">
+            <div className="font-medium truncate" title={e.symbol}>{e.symbol}</div>
+            <div className="text-xs text-[var(--gray)] line-clamp-2 break-all">{e.action}</div>
+          </div>
+          <div className="text-right text-xs whitespace-nowrap text-[var(--gray)]">
+            {e.amount != null ? <>影响: {fmtNum(e.amount)}</> : null}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

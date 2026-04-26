@@ -59,7 +59,7 @@ function HeroMiniChart({ data, range, isPerformance, gainPct }) {
       data: values,
       smooth: true,
       symbol: 'none',
-      lineStyle: { color: '#ffffff', width: 2 },
+      lineStyle: { color: isPerformance && values.length && values[values.length - 1] < 0 ? '#fb7185' : '#ffffff', width: 2 },
       areaStyle: {
         color: {
           type: 'linear',
@@ -109,24 +109,30 @@ export default function OverviewTab() {
     currentNavRange === 'custom' && customNavStart
       ? getCustomRangeSummary(data, customNavStart, customNavEnd)
       : (data.rangeSummaries?.[currentNavRange] || {});
+  // 主数字显示扣净入金后的真实收益率（gainPct）；raw（含入金的绝对变化）放副标对照
   const perfPct = rangeSummary.gainPct != null
     ? rangeSummary.gainPct
-    : (equitySeries.length && (equitySeries[0].value || 0) !== 0
-        ? (((equitySeries[equitySeries.length - 1].value / equitySeries[0].value) - 1) * 100)
-        : 0);
-  const rangeTotalGain = rangeSummary.gain != null
-    ? convertCurrency(rangeSummary.gain, displayCurrency, baseCurrency, fxRates)
-    : (equitySeries.length
-        ? convertCurrency(equitySeries[equitySeries.length - 1].value - equitySeries[0].value, displayCurrency, baseCurrency, fxRates)
-        : 0);
+    : (rangeSummary.rawGainPct != null
+        ? rangeSummary.rawGainPct
+        : (equitySeries.length && (equitySeries[0].value || 0) !== 0
+            ? (((equitySeries[equitySeries.length - 1].value / equitySeries[0].value) - 1) * 100)
+            : 0));
+  const rawPerfPct = rangeSummary.rawGainPct != null ? rangeSummary.rawGainPct : null;
   const rangeNetFlow = rangeSummary.netFlow != null
     ? convertCurrency(rangeSummary.netFlow, displayCurrency, baseCurrency, fxRates)
     : null;
+  const rangeTotalGain = rangeSummary.gain != null
+    ? convertCurrency(rangeSummary.gain, displayCurrency, baseCurrency, fxRates)
+    : (rangeSummary.rawGain != null
+        ? convertCurrency(rangeSummary.rawGain, displayCurrency, baseCurrency, fxRates)
+        : (equitySeries.length
+            ? convertCurrency(equitySeries[equitySeries.length - 1].value - equitySeries[0].value, displayCurrency, baseCurrency, fxRates)
+            : 0));
 
   return (
     <div className="space-y-8">
       {/* Hero */}
-      <div className="rounded-xl bg-black p-6 text-white lg:p-8">
+      <div className="rounded-xl bg-gradient-to-br from-gray-900 via-black to-gray-900 p-6 text-white lg:p-8">
         {/* Mode tabs */}
         <div className="mb-4 inline-flex border-b border-white/20">
           <button
@@ -178,7 +184,7 @@ export default function OverviewTab() {
         {heroTab === 'value' ? (
           <div className="text-4xl font-bold tracking-tight lg:text-5xl">{fmtCur(totalNav, displayCurrency)}</div>
         ) : (
-          <div className={`text-4xl font-bold tracking-tight lg:text-5xl ${perfPct >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+          <div className={`text-4xl font-bold tracking-tight lg:text-5xl ${perfPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             {perfPct >= 0 ? '+' : ''}{fmtNum(perfPct, 2)}%
           </div>
         )}
@@ -186,11 +192,11 @@ export default function OverviewTab() {
         {/* Change */}
         <div className="mt-3 flex flex-wrap items-center gap-3 text-base">
           {heroTab === 'value' && (
-            <span className={rangeTotalGain >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}>
+            <span className={rangeTotalGain >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
               {rangeTotalGain >= 0 ? '+' : ''}{fmtCur(rangeTotalGain, displayCurrency)}
             </span>
           )}
-          <span className={perfPct >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}>
+          <span className={perfPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
             {(perfPct >= 0 ? '+' : '') + fmtNum(perfPct, 2)}%
           </span>
           <span className="text-white/60">
@@ -207,7 +213,7 @@ export default function OverviewTab() {
 
         {/* Mini chart */}
         <div className="mt-4 h-40 w-full lg:h-52">
-          <HeroMiniChart data={data} range={currentNavRange} isPerformance={heroTab === 'performance'} gainPct={rangeSummary.gainPct} />
+          <HeroMiniChart data={data} range={currentNavRange} isPerformance={heroTab === 'performance'} gainPct={perfPct} />
         </div>
 
         {/* Range buttons */}
@@ -270,20 +276,30 @@ export default function OverviewTab() {
         </div>
       </div>
 
-      {/* KPI */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          { label: '最新净值', value: fmtCur(totalNav, displayCurrency) },
-          { label: '股票市值', value: fmtCur(convertCurrency(summary.stocks || 0, displayCurrency, baseCurrency, fxRates), displayCurrency) },
-          { label: 'ETF 市值', value: fmtCur(convertCurrency(summary.etfs || 0, displayCurrency, baseCurrency, fxRates), displayCurrency) },
-          { label: '期权市值', value: fmtCur(convertCurrency(summary.options || 0, displayCurrency, baseCurrency, fxRates), displayCurrency) },
-          { label: '现金', value: fmtCur(convertCurrency(summary.cash || 0, displayCurrency, baseCurrency, fxRates), displayCurrency) },
-        ].map((k) => (
-          <div key={k.label} className="rounded-xl border border-[var(--light-gray)] p-6 transition hover:border-black hover:shadow-md">
-            <div className="mb-2 text-sm text-[var(--gray)]">{k.label}</div>
-            <div className="text-2xl font-bold">{k.value}</div>
-          </div>
-        ))}
+      {/* KPI —— 总净值独立一层，下面四个组成项带占比 */}
+      <div className="rounded-xl border border-[var(--light-gray)] p-6">
+        <div className="mb-1 text-sm text-[var(--gray)]">最新净值</div>
+        <div className="text-3xl font-bold lg:text-4xl">{fmtCur(totalNav, displayCurrency)}</div>
+        <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {[
+            { label: '股票市值', raw: summary.stocks || 0 },
+            { label: 'ETF 市值', raw: summary.etfs || 0 },
+            { label: '期权市值', raw: summary.options || 0 },
+            { label: '现金', raw: summary.cash || 0 },
+          ].map((k) => {
+            const converted = convertCurrency(k.raw, displayCurrency, baseCurrency, fxRates);
+            const pct = totalNav ? (converted / totalNav) * 100 : 0;
+            return (
+              <div key={k.label} className="rounded-lg border border-[var(--light-gray)] p-4 transition hover:border-black">
+                <div className="mb-1 flex items-center justify-between text-xs text-[var(--gray)]">
+                  <span>{k.label}</span>
+                  <span>占比 {fmtNum(pct, 1)}%</span>
+                </div>
+                <div className={`text-lg font-bold ${converted >= 0 ? '' : 'text-[var(--danger)]'}`}>{fmtCur(converted, displayCurrency)}</div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Nav Chart full card */}
@@ -303,35 +319,56 @@ export default function OverviewTab() {
 
       {/* Balance Breakdown */}
       <div className="rounded-xl border border-[var(--light-gray)] p-6">
-        <div className="mb-4 text-lg font-semibold">账户余额明细</div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="mb-5 text-lg font-semibold">账户余额明细</div>
+        <div className="space-y-6">
           {[
-            { label: '净清算值', value: bb.netLiquidation },
-            { label: '未实现盈亏', value: bb.unrealizedPnl },
-            { label: '已实现盈亏', value: bb.realizedPnl },
-            { label: '总现金', value: bb.totalCash },
-            { label: '已结算现金', value: bb.settledCash },
-            { label: '股票市值', value: bb.stockValue },
-            { label: 'ETF 市值', value: bb.etfValue },
-            { label: '期权市值', value: bb.optionValue },
-            { label: '基金市值', value: bb.fundValue },
-            { label: '债券市值', value: bb.bondValue },
-            { label: '大宗商品', value: bb.commodityValue },
-            { label: '应计股息', value: bb.dividendAccruals },
-            { label: '应计利息', value: bb.interestAccruals },
-          ]
-            .filter((x) => x.value != null && !isNaN(Number(x.value)))
-            .map((x) => {
-              const num = convertCurrency(Number(x.value), displayCurrency, baseCurrency, fxRates);
-              return (
-                <div key={x.label} className="rounded-lg border border-[var(--light-gray)] p-3">
-                  <div className="text-xs text-[var(--gray)]">{x.label}</div>
-                  <div className={`text-lg font-bold ${num >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
-                    {fmtCur(num, displayCurrency)}
-                  </div>
+            { key: 'core', title: '核心', large: true, items: [
+              { label: '净清算值', value: bb.netLiquidation },
+              { label: '未实现盈亏', value: bb.unrealizedPnl },
+              { label: '已实现盈亏', value: bb.realizedPnl },
+            ]},
+            { key: 'market', title: '市值', items: [
+              { label: '股票市值', value: bb.stockValue },
+              { label: 'ETF 市值', value: bb.etfValue },
+              { label: '期权市值', value: bb.optionValue },
+              { label: '基金市值', value: bb.fundValue },
+              { label: '债券市值', value: bb.bondValue },
+              { label: '大宗商品', value: bb.commodityValue },
+            ]},
+            { key: 'cash', title: '现金', items: [
+              { label: '总现金', value: bb.totalCash },
+              { label: '已结算现金', value: bb.settledCash },
+            ]},
+            { key: 'accrual', title: '应计', items: [
+              { label: '应计股息', value: bb.dividendAccruals },
+              { label: '应计利息', value: bb.interestAccruals },
+            ]},
+          ].map((group) => {
+            const visible = group.items.filter((x) => x.value != null && !isNaN(Number(x.value)));
+            if (visible.length === 0) return null;
+            const gridCls =
+              group.key === 'core' ? 'grid grid-cols-1 gap-3 sm:grid-cols-3' :
+              group.key === 'market' ? 'grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6' :
+              'grid grid-cols-2 gap-3';
+            return (
+              <div key={group.key}>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--gray)]">{group.title}</div>
+                <div className={gridCls}>
+                  {visible.map((x) => {
+                    const num = convertCurrency(Number(x.value), displayCurrency, baseCurrency, fxRates);
+                    return (
+                      <div key={x.label} className={`rounded-lg border border-[var(--light-gray)] transition-colors hover:border-black ${group.large ? 'p-4' : 'p-3'}`}>
+                        <div className="text-xs text-[var(--gray)]">{x.label}</div>
+                        <div className={`font-bold ${group.large ? 'text-xl lg:text-2xl' : 'text-lg'} ${num >= 0 ? 'text-[var(--success)]' : 'text-[var(--danger)]'}`}>
+                          {fmtCur(num, displayCurrency)}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -518,7 +555,7 @@ export default function OverviewTab() {
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="text-sm text-[var(--gray)]">持仓集中度 CR5:</span>
                   <span className="font-semibold">{fmtNum(cr5, 2)}%</span>
-                  {cr5 > 20 && <span className="rounded bg-[var(--danger)] px-2 py-0.5 text-xs text-white">高度集中</span>}
+                  {cr5 > 40 && <span className="rounded bg-[var(--danger)] px-2 py-0.5 text-xs text-white">高度集中</span>}
                   <span className="mx-2 hidden text-[var(--light-gray)] sm:inline">|</span>
                   <span className="text-sm text-[var(--gray)]">CR10:</span>
                   <span className="font-semibold">{fmtNum(cr10, 2)}%</span>

@@ -7,7 +7,8 @@ import time
 import json
 import requests
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from db.postgres_client import get_cursor, execute
@@ -40,9 +41,17 @@ def _save_settings(data):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+_NY_TZ = ZoneInfo("America/New_York")
+
+
+def _ny_now() -> datetime:
+    return datetime.now(_NY_TZ)
+
+
 def _is_us_market_open(d: date = None) -> bool:
-    """判断美股是否开盘（仅简单排除周末和常见法定假日，不调休）。"""
-    d = d or date.today()
+    """判断美股是否开盘（仅简单排除周末和常见法定假日，不调休）。
+    日期口径按纽约时区，避免在 NY 周五午后（HKT 周六上午）被错判为休市。"""
+    d = d or _ny_now().date()
     if d.weekday() >= 5:
         return False
     fixed_holidays = {(1, 1), (6, 19), (7, 4), (12, 25)}
@@ -60,6 +69,22 @@ def _is_us_market_open(d: date = None) -> bool:
     if d.weekday() == 3 and d.month == 11 and 22 <= d.day <= 28:
         return False
     return True
+
+
+def _us_extended_session() -> str:
+    """按 NY 时间返回当前所处的扩展时段：'pre' | 'post' | None。
+    pre  = 04:00 - 09:30 ET
+    post = 16:00 - 20:00 ET
+    非交易日或常规时段一律返回 None（常规时段 Finnhub 实时价已够用）。"""
+    now = _ny_now()
+    if not _is_us_market_open(now.date()):
+        return None
+    minutes = now.hour * 60 + now.minute
+    if 240 <= minutes < 570:
+        return "pre"
+    if 960 <= minutes < 1200:
+        return "post"
+    return None
 
 
 def _is_equity_symbol(sym):
@@ -231,6 +256,27 @@ def _fetch_yahoo_prices(symbols):
 
     if extended_count:
         print(f"[market] Yahoo extended-hours prices for {extended_count} symbols")
+    return prices
+
+
+def _fetch_yahoo_extended_only(symbols):
+    """只取 Yahoo postMarketPrice / preMarketPrice，用于在主源拿到 regular close 后强制覆盖。"""
+    prices = {}
+    if not symbols:
+        return prices
+    try:
+        import yfinance as yf
+    except ImportError:
+        print("[market] yfinance not installed, skipping extended-hours override")
+        return prices
+    for sym in symbols:
+        try:
+            info = yf.Ticker(sym).info
+            ext_price = info.get("postMarketPrice") or info.get("preMarketPrice")
+            if ext_price and float(ext_price) > 0:
+                prices[sym] = float(ext_price)
+        except Exception:
+            pass
     return prices
 
 
@@ -424,6 +470,15 @@ def update_market_prices(user_id=None):
             for sym, price in prices.items():
                 fetched[sym] = (price, src_name)
 
+        # 盘前盘后强制 Yahoo 覆盖：Finnhub /quote 在 ext hours 只返 regular close，需要 Yahoo 的 pre/postMarketPrice 顶上
+        ext_session = _us_extended_session()
+        if ext_session and symbols:
+            print(f"[market] Extended-hours session ({ext_session}), overriding {len(symbols)} symbols via Yahoo...")
+            ext_prices = _fetch_yahoo_extended_only(symbols)
+            for sym, price in ext_prices.items():
+                fetched[sym] = (price, f"yahoo-{ext_session}")
+            print(f"[market] Extended-hours overrides applied: {len(ext_prices)} symbols")
+
         # Write to DB (personal mode: ignore user_id in PK)
         with get_cursor() as cur:
             # 动态检测 market_prices 主键，以适配不同 schema
@@ -538,7 +593,7 @@ def _invalidate_dashboard_cache(user_id):
 def scheduled_update_all():
     """Cron / scheduler entry point: update all users."""
     if not _is_us_market_open():
-        print(f"[market] US market is closed today ({date.today()}), skip update.")
+        print(f"[market] US market is closed today (NY={_ny_now().date()}), skip update.")
         return
     update_market_prices()
 

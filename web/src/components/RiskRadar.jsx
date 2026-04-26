@@ -40,16 +40,20 @@ export default function RiskRadar({ data }) {
 
   return (
     <div className="space-y-4">
-      <div className="text-sm font-semibold">风险雷达</div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Stat label="最大个股占比" value={fmtPct(concentration.singleStockMaxPct)} />
-        <Stat label="Top5 占比" value={fmtPct(concentration.top5Pct)} />
+        <Stat label="最大个股占比" value={pctStr(concentration.singleStockMaxPct)} />
+        <Stat label="Top5 占比" value={pctStr(concentration.top5Pct)} />
         <Stat label="总持仓数" value={concentration.totalPositions || 0} />
-        <Stat label="年化波动" value={fmtPct(scores.volatility)} />
+        <Stat label="年化波动" value={pctStr(scores.volatility)} />
       </div>
       <ECharts option={option} style={{ height: 300 }} />
     </div>
   );
+}
+
+function pctStr(n) {
+  if (n == null || isNaN(n)) return '--';
+  return Number(n).toFixed(2) + '%';
 }
 
 function Stat({ label, value }) {

@@ -248,6 +248,21 @@ def api_me():
 
 
 # ------------------------------------------------------------------
+# Release Notes
+# ------------------------------------------------------------------
+@app.route("/api/release-notes", methods=["GET"])
+def api_release_notes():
+    path = os.path.join(APP_DIR, "config", "release_notes.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return jsonify(json.load(f))
+    except FileNotFoundError:
+        return jsonify({"currentVersion": None, "versions": []})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ------------------------------------------------------------------
 # Accounts
 # ------------------------------------------------------------------
 @app.route("/api/accounts", methods=["GET"])
@@ -282,49 +297,90 @@ def api_accounts():
 
 
 # ------------------------------------------------------------------
-# Search
+# Telegram Bot Bindings
 # ------------------------------------------------------------------
-@app.route("/api/search", methods=["GET"])
+import secrets as _secrets
+
+
+@app.route("/api/telegram/generate-code", methods=["POST"])
 @jwt_required()
-def api_search():
-    """Search user's positions and trades by symbol."""
+def api_telegram_generate_code():
+    """生成一个 6 位绑定码，写入 Redis（TTL 10 分钟）。用户到 Bot 发 /bind <code> 完成绑定。"""
     user_id = get_jwt_identity()
-    q = request.args.get("q", "").strip().upper()
-    if not q:
-        return jsonify({"results": []})
-
-    target_user = _resolve_preview_user_id(user_id)
-    like = f"%{q}%"
-
-    positions = execute("""
-        SELECT DISTINCT ON (symbol) symbol, quantity, position_value, unrealized_pnl, account_id
-        FROM positions
-        WHERE user_id = %s AND symbol ILIKE %s
-        ORDER BY symbol, date DESC
-        LIMIT 5
-    """, (target_user, like))
-
-    trades = execute("""
-        SELECT symbol, trade_date, buy_sell, quantity, trade_price, proceeds, account_id
-        FROM archive_trade
-        WHERE user_id = %s AND symbol ILIKE %s
-        ORDER BY trade_date DESC
-        LIMIT 5
-    """, (target_user, like))
-
+    target_user = user_id
+    code = f"{_secrets.randbelow(1000000):06d}"
+    redis_conn.setex(f"tgbind:{code}", 600, target_user)
     return jsonify({
-        "positions": [
-            {"symbol": r["symbol"], "quantity": r["quantity"], "position_value": r["position_value"],
-             "unrealized_pnl": r["unrealized_pnl"], "account_id": r["account_id"]}
-            for r in positions
-        ],
-        "trades": [
-            {"symbol": r["symbol"], "trade_date": r["trade_date"], "buy_sell": r["buy_sell"],
-             "quantity": r["quantity"], "trade_price": r["trade_price"], "proceeds": r["proceeds"],
-             "account_id": r["account_id"]}
-            for r in trades
-        ]
+        "code": code,
+        "expiresIn": 600,
+        "botUsername": os.environ.get("TELEGRAM_BOT_USERNAME", "ibdashboard_bot")
     })
+
+
+@app.route("/api/telegram/status", methods=["GET"])
+@jwt_required()
+def api_telegram_status():
+    """返回当前用户的所有 Telegram 绑定。"""
+    user_id = get_jwt_identity()
+    target_user = user_id
+    rows = execute("""
+        SELECT chat_id, telegram_username, telegram_first_name,
+               bound_at, subscribed_daily, last_interaction_at
+        FROM user_telegram_bindings
+        WHERE user_id = %s
+        ORDER BY bound_at DESC
+    """, (target_user,))
+    bindings = []
+    for r in (rows or []):
+        bindings.append({
+            "chatId": r["chat_id"],
+            "username": r["telegram_username"],
+            "firstName": r["telegram_first_name"],
+            "boundAt": r["bound_at"].isoformat() if r["bound_at"] else None,
+            "subscribedDaily": r["subscribed_daily"],
+            "lastInteractionAt": r["last_interaction_at"].isoformat() if r["last_interaction_at"] else None,
+        })
+    return jsonify({"bindings": bindings, "botUsername": os.environ.get("TELEGRAM_BOT_USERNAME", "ibdashboard_bot")})
+
+
+@app.route("/api/telegram/unbind", methods=["POST"])
+@jwt_required()
+def api_telegram_unbind():
+    """解绑指定 chat_id（或当前用户所有绑定）。"""
+    user_id = get_jwt_identity()
+    target_user = user_id
+    body = request.get_json(silent=True) or {}
+    chat_id = body.get("chatId")
+    with get_cursor() as cur:
+        if chat_id:
+            cur.execute("DELETE FROM user_telegram_bindings WHERE user_id = %s AND chat_id = %s",
+                        (target_user, chat_id))
+        else:
+            cur.execute("DELETE FROM user_telegram_bindings WHERE user_id = %s", (target_user,))
+        removed = cur.rowcount
+    return jsonify({"success": True, "removed": removed})
+
+
+@app.route("/api/telegram/subscription", methods=["POST"])
+@jwt_required()
+def api_telegram_subscription():
+    """切换指定 chat_id 的每日播报订阅开关。"""
+    user_id = get_jwt_identity()
+    target_user = user_id
+    body = request.get_json(silent=True) or {}
+    chat_id = body.get("chatId")
+    subscribed = bool(body.get("subscribed", True))
+    if not chat_id:
+        return jsonify({"error": "chatId required"}), 400
+    with get_cursor() as cur:
+        cur.execute("""
+            UPDATE user_telegram_bindings
+            SET subscribed_daily = %s
+            WHERE user_id = %s AND chat_id = %s
+        """, (subscribed, target_user, chat_id))
+        if cur.rowcount == 0:
+            return jsonify({"error": "binding not found"}), 404
+    return jsonify({"success": True, "subscribed": subscribed})
 
 
 # ------------------------------------------------------------------
@@ -380,34 +436,6 @@ def api_user_settings_save():
             updated_at = NOW()
         WHERE user_id = %s
     """, (bot_token or None, chat_id or None, report_schedule, json.dumps(option_alert_days), user_id))
-    return jsonify({"success": True})
-
-
-@app.route("/api/user/benchmarks", methods=["GET"])
-@jwt_required()
-def api_user_benchmarks_get():
-    """Get user's custom benchmarks."""
-    user_id = get_jwt_identity()
-    row = execute_one("SELECT custom_benchmarks FROM user_profiles WHERE user_id = %s", (user_id,))
-    benchmarks = row.get("custom_benchmarks") if row else []
-    if isinstance(benchmarks, str):
-        benchmarks = json.loads(benchmarks)
-    return jsonify({"benchmarks": benchmarks or []})
-
-
-@app.route("/api/user/benchmarks", methods=["POST"])
-@jwt_required()
-def api_user_benchmarks_save():
-    """Save user's custom benchmarks."""
-    user_id = get_jwt_identity()
-    data = request.get_json(silent=True) or {}
-    benchmarks = data.get("benchmarks", [])
-    execute("""
-        UPDATE user_profiles
-        SET custom_benchmarks = %s::jsonb,
-            updated_at = NOW()
-        WHERE user_id = %s
-    """, (json.dumps(benchmarks), user_id))
     return jsonify({"success": True})
 
 
@@ -739,19 +767,29 @@ DASHBOARD_SLICES = {
         "monthlyTradeStats", "benchmarks", "mtmPerformanceSummary",
         "changeInNav", "transactionFees", "history", "monthlyReturns",
         "tradeBehavior", "costBreakdown", "leverageMetrics",
-        "tradingHeatmap", "tradeRankings", "feeErosion", "timingAttribution"
+        "tradingHeatmap", "tradeRankings", "feeErosion", "timingAttribution",
+        "optionEaeEvents", "cashOpportunity"
     },
     "details": {
         "accountId", "asOfDate", "trades", "dividends", "cashTransactions", "isDemo",
         "transactionFees", "corporateActions", "stmtFunds",
         "changeInNavDetails", "conversionRates", "changeInNav",
         "taxSummary", "cashflowWaterfall",
-        "orderExecution", "washSaleAlerts"
+        "orderExecution", "washSaleAlerts",
+        "dataQuality"
     },
     "changes": {
         "accountId", "asOfDate", "baseCurrency", "isDemo",
         "positionChanges", "latestDayTrades", "costBasisHoldings", "soldAnalysis",
         "balanceBreakdown", "changeInNav", "dailyPnL"
+    },
+    "chengji": {
+        "accountId", "asOfDate", "baseCurrency", "isDemo",
+        "trades", "soldAnalysis", "optionEaeEvents",
+        "costBasisHoldings", "openPositions", "fxRates"
+    },
+    "tax": {
+        "accountId", "asOfDate", "baseCurrency", "isDemo", "taxView", "changeInNav"
     }
 }
 
@@ -763,6 +801,8 @@ def _slice_payload(payload, slice_name):
     # Demo payload: return full dataset so guest users see rich sample data in every tab
     if payload.get("isDemo"):
         return payload
+    # 数据完整性提示要在所有 tab 顶部展示，强制并入每个 slice
+    keys = keys | {"dataQualityWarning"}
     return {k: payload.get(k) for k in keys if k in payload}
 
 
@@ -2056,80 +2096,6 @@ def api_share_dashboard_slice(token, alias, slice_name):
     resp = jsonify(_slice_payload(payload, slice_name))
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return resp
-
-
-# ------------------------------------------------------------------
-# User Data Export
-# ------------------------------------------------------------------
-@app.route("/api/user/export/<data_type>", methods=["GET"])
-@jwt_required()
-def api_user_export(data_type):
-    """Export user data as CSV. data_type: trades, dividends, positions, nav."""
-    user_id = get_jwt_identity()
-    account_id = request.args.get("account_id", "combined")
-    target_user = _resolve_preview_user_id(user_id)
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    if data_type == "trades":
-        writer.writerow(["date", "symbol", "buy_sell", "quantity", "trade_price", "proceeds", "currency", "account_id"])
-        rows = execute("""
-            SELECT trade_date, symbol, buy_sell, quantity, trade_price, proceeds, currency, account_id
-            FROM archive_trade
-            WHERE user_id = %s AND (%s = 'combined' OR account_id = %s)
-            ORDER BY trade_date DESC
-        """, (target_user, account_id, account_id))
-        for r in rows:
-            writer.writerow([r["trade_date"], r["symbol"], r["buy_sell"], r["quantity"],
-                             r["trade_price"], r["proceeds"], r["currency"], r["account_id"]])
-        filename = f"trades_{account_id}.csv"
-
-    elif data_type == "dividends":
-        writer.writerow(["date", "symbol", "amount", "currency", "account_id"])
-        rows = execute("""
-            SELECT date, symbol, amount, currency, account_id
-            FROM archive_dividend
-            WHERE user_id = %s AND (%s = 'combined' OR account_id = %s)
-            ORDER BY date DESC
-        """, (target_user, account_id, account_id))
-        for r in rows:
-            writer.writerow([r["date"], r["symbol"], r["amount"], r["currency"], r["account_id"]])
-        filename = f"dividends_{account_id}.csv"
-
-    elif data_type == "positions":
-        writer.writerow(["date", "symbol", "quantity", "position_value", "cost_basis", "unrealized_pnl", "currency", "account_id"])
-        rows = execute("""
-            SELECT date, symbol, quantity, position_value, cost_basis, unrealized_pnl, currency, account_id
-            FROM positions
-            WHERE user_id = %s AND (%s = 'combined' OR account_id = %s)
-            ORDER BY date DESC, position_value DESC
-        """, (target_user, account_id, account_id))
-        for r in rows:
-            writer.writerow([r["date"], r["symbol"], r["quantity"], r["position_value"],
-                             r["cost_basis"], r["unrealized_pnl"], r["currency"], r["account_id"]])
-        filename = f"positions_{account_id}.csv"
-
-    elif data_type == "nav":
-        writer.writerow(["date", "ending_value", "total_gain", "total_gain_pct", "account_id"])
-        rows = execute("""
-            SELECT date, ending_value, total_gain, total_gain_pct, account_id
-            FROM daily_nav
-            WHERE user_id = %s AND (%s = 'combined' OR account_id = %s)
-            ORDER BY date DESC
-        """, (target_user, account_id, account_id))
-        for r in rows:
-            writer.writerow([r["date"], r["ending_value"], r["total_gain"], r["total_gain_pct"], r["account_id"]])
-        filename = f"nav_{account_id}.csv"
-
-    else:
-        return jsonify({"error": "Unknown export type"}), 400
-
-    return Response(
-        output.getvalue(),
-        mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
 
 
 # Static files (React SPA catch-all)

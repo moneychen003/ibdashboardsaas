@@ -23,6 +23,10 @@ def set_cost_basis_user_context(user_id):
     """pgdash 在调用 generate_dashboard_data 前后设置/清除，用于 cost_basis Redis 缓存命名。"""
     _cb_context.user_id = user_id
 
+def set_user_base_currency(currency):
+    """pgdash 在调用前后注入用户偏好货币（user_profiles.base_currency），优先级高于 IB 账户实际货币与全局 config。None 表示清除。"""
+    _cb_context.user_base_currency = currency or None
+
 
 def _cb_cache_get(user_id, account_id, max_stmt_date):
     try:
@@ -576,6 +580,89 @@ def get_data_quality(conn, account_id=None):
     }
 
 
+def get_data_quality_warning(conn, account_id=None):
+    """检测 Flex Query 数据是否完整。返回 banner 提示对象，或 None。
+
+    典型问题：用户在 IB Flex Query 把 Period 设成 "Last 1 Calendar Day"，
+    当日没下单时 Trades / UnbundledCommissionDetails / StatementOfFunds 全空，
+    导致佣金、交易等字段长期为 0。
+    """
+    cursor = conn.cursor()
+    is_combined = (not account_id) or str(account_id).lower() == 'combined'
+
+    def _count(table, where_extra=""):
+        try:
+            if is_combined:
+                cursor.execute(f"SELECT COUNT(*) FROM {table} {('WHERE ' + where_extra) if where_extra else ''}")
+            else:
+                clause = "stmt_account_id = ?"
+                if where_extra:
+                    clause = f"{clause} AND {where_extra}"
+                cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE {clause}", (account_id,))
+            row = cursor.fetchone()
+            return int(row[0] or 0) if row else 0
+        except sqlite3.OperationalError:
+            return 0
+
+    open_pos = _count('archive_open_position')
+    if open_pos == 0:
+        return None  # 新用户/无持仓不打扰
+
+    trade_count = _count('archive_trade')
+    cash_tx_count = _count('archive_cash_transaction')
+    stmt_funds_count = _count('archive_statement_of_funds_line')
+    unbundled_count = _count('archive_unbundled_commission_detail')
+
+    # Flex 时间窗口：取所有 flex_statement 里 from_date / to_date 的并集跨度
+    from_date = to_date = None
+    try:
+        if is_combined:
+            cursor.execute("SELECT MIN(from_date), MAX(to_date) FROM archive_flex_statement")
+        else:
+            cursor.execute("SELECT MIN(from_date), MAX(to_date) FROM archive_flex_statement WHERE account_id = ?", (account_id,))
+        row = cursor.fetchone()
+        if row:
+            from_date, to_date = row[0], row[1]
+    except sqlite3.OperationalError:
+        pass
+
+    window_days = None
+    if from_date and to_date:
+        try:
+            from datetime import datetime as _dt
+            f = _dt.strptime(str(from_date)[:10], '%Y-%m-%d').date() if '-' in str(from_date) else _dt.strptime(str(from_date), '%Y%m%d').date()
+            t = _dt.strptime(str(to_date)[:10], '%Y-%m-%d').date() if '-' in str(to_date) else _dt.strptime(str(to_date), '%Y%m%d').date()
+            window_days = (t - f).days + 1
+        except Exception:
+            window_days = None
+
+    # 触发条件：有持仓 + （没有任何交易明细 或 时间窗口 ≤ 7 天 或 完全没有佣金/资金报表）
+    no_trade_data = (trade_count == 0)
+    short_window = (window_days is not None and window_days <= 7)
+    no_commission_detail = (unbundled_count == 0 and stmt_funds_count == 0)
+
+    if not (no_trade_data or short_window or (no_commission_detail and trade_count < 5)):
+        return None
+
+    return {
+        'severity': 'warning',
+        'code': 'incomplete_flex_window',
+        'title': '数据可能不完整：佣金/交易等字段显示为 0',
+        'message': '检测到您的 IB Flex Query 时间窗口过短，或部分 Sections 输出为空，因此佣金、交易明细等字段无法填充。',
+        'suggestion': '请打开 IB Account Management → Reports → Flex Queries，编辑当前的 Activity Flex Query：\n1) 把 Period 改为 Year to Date 或 Last 365 Calendar Days；\n2) 确认 Sections 已勾选 Trades、Unbundled Commission Details、Statement of Funds、Change in NAV、MTD/YTD Performance Summary；\n3) 保存后回到本站「设置 → Flex 同步」点一次手动同步，或重新上传一份 XML 即可恢复。',
+        'metrics': {
+            'openPositions': open_pos,
+            'tradeCount': trade_count,
+            'cashTransactionCount': cash_tx_count,
+            'stmtFundsCount': stmt_funds_count,
+            'unbundledCommissionCount': unbundled_count,
+            'flexWindowDays': window_days,
+            'flexFromDate': str(from_date) if from_date else None,
+            'flexToDate': str(to_date) if to_date else None,
+        }
+    }
+
+
 def get_tax_view(conn, account_id=None):
     """税务视图：已实现（YTD，长/短期）+ 未实现（按每个持仓最早 BUY 日期估算长/短期）。
 
@@ -803,8 +890,10 @@ def get_cash_opportunity(conn, account_id=None):
 
 
 def get_base_currency(conn, account_id=None):
-    if _CONFIG_BASE_CURRENCY:
-        return _CONFIG_BASE_CURRENCY
+    # 1) 用户偏好（pgdash 注入，user_profiles.base_currency）优先
+    user_base = getattr(_cb_context, "user_base_currency", None)
+    if user_base:
+        return user_base
     cursor = conn.cursor()
     if account_id:
         cursor.execute('''
@@ -824,7 +913,9 @@ def get_base_currency(conn, account_id=None):
         row = cursor.fetchone()
         if row and row[0]:
             return row[0]
-    return 'CNH'
+    if _CONFIG_BASE_CURRENCY:
+        return _CONFIG_BASE_CURRENCY
+    return 'USD'
 
 
 def _get_base_currency(cursor, account_id=None):
@@ -1196,6 +1287,7 @@ def get_latest_positions(conn, account_id=None):
                 ON p.symbol = aop.symbol
                 AND p.account_id = aop.stmt_account_id
                 AND p.date = aop.stmt_date
+                AND (aop.level_of_detail = 'SUMMARY' OR aop.level_of_detail IS NULL OR aop.level_of_detail = '')
             WHERE p.account_id = ? AND p.date = (SELECT MAX(date) FROM positions WHERE account_id = ?)
             ORDER BY p.asset_type, p.symbol
         ''', (account_id, account_id))
@@ -1232,6 +1324,7 @@ def get_latest_positions(conn, account_id=None):
                     ON p.symbol = aop.symbol
                     AND p.account_id = aop.stmt_account_id
                     AND p.date = aop.stmt_date
+                    AND (aop.level_of_detail = 'SUMMARY' OR aop.level_of_detail IS NULL OR aop.level_of_detail = '')
                 WHERE p.account_id = ? AND p.date = ?
                 ORDER BY p.asset_type, p.symbol
             ''', (acc, max_date))
@@ -1563,7 +1656,8 @@ def get_trades(conn, account_id=None, limit=2000):
     cursor = conn.cursor()
     sql = '''
         SELECT trade_date, symbol, buy_sell, quantity, trade_price, proceeds,
-               fifo_pnl_realized, asset_category, currency, description, mtm_pnl
+               fifo_pnl_realized, asset_category, currency, description, mtm_pnl, notes,
+               open_close_indicator
         FROM archive_trade
         WHERE {where}
         ORDER BY trade_date DESC
@@ -1580,7 +1674,9 @@ def get_trades(conn, account_id=None, limit=2000):
         'tradeDate': row[0], 'date': row[0], 'symbol': row[1], 'buySell': row[2],
         'quantity': row[3], 'tradePrice': row[4], 'proceeds': row[5],
         'realizedPnl': row[6], 'assetCategory': row[7], 'currency': row[8], 'description': row[9],
-        'mtmPnl': safe_float(row[10]) if row[10] is not None else 0.0
+        'mtmPnl': safe_float(row[10]) if row[10] is not None else 0.0,
+        'notes': row[11] or '',
+        'openCloseIndicator': row[12] or ''
     } for row in cursor.fetchall()]
 
 
@@ -1680,7 +1776,8 @@ def get_latest_day_trades(conn, account_id=None):
         return {'tradeDate': None, 'trades': []}
     cursor.execute(f'''
         SELECT trade_date, symbol, buy_sell, quantity, trade_price, proceeds,
-               fifo_pnl_realized, asset_category, currency, description, mtm_pnl
+               fifo_pnl_realized, asset_category, currency, description, mtm_pnl, notes,
+               open_close_indicator
         FROM archive_trade
         WHERE {where} AND trade_date = ?
         ORDER BY symbol, buy_sell
@@ -1693,7 +1790,9 @@ def get_latest_day_trades(conn, account_id=None):
             'quantity': qty, 'tradePrice': safe_float(r[4]),
             'proceeds': safe_float(r[5]), 'realizedPnl': safe_float(r[6]) if r[6] is not None else None,
             'assetCategory': r[7], 'currency': r[8], 'description': r[9],
-            'mtmPnl': safe_float(r[10]) if r[10] is not None else 0.0
+            'mtmPnl': safe_float(r[10]) if r[10] is not None else 0.0,
+            'notes': r[11] or '',
+            'openCloseIndicator': r[12] or ''
         })
     return {'tradeDate': latest_trade_date, 'trades': trades}
 
@@ -1923,7 +2022,10 @@ def get_sold_positions_analysis(conn, account_id=None, lookback_days=30):
 
 
 def get_trade_pnl_analysis(trades):
-    """基于 trade mtm_pnl 计算盈亏分析（仅对平仓/减少持仓方向的交易计为已实现盈亏）"""
+    """已实现盈亏分析。优先用 IB 标好的 fifo_pnl_realized；
+    回退 mtm_pnl 仅在持仓方向反转且 IB 未填 fifo 时使用。
+    Assignment / Exercise（notes 含 'A' 或 'Ex'）即使建仓方向也按平仓计入，
+    防止 short option 被指派后股票腿因 pos==0 漏算。"""
     from collections import defaultdict
 
     # 重建持仓以识别平仓交易
@@ -1935,21 +2037,38 @@ def get_trade_pnl_analysis(trades):
 
     for t in sorted_trades:
         qty = safe_float(t.get('quantity', 0))
-        mtm = safe_float(t.get('mtmPnl', 0))
-        symbol = t.get('symbol', 'OTHER')
-        cat = (t.get('assetCategory') or 'OTHER').upper()
         if qty == 0:
             continue
+        mtm = safe_float(t.get('mtmPnl', 0))
+        realized_raw = t.get('realizedPnl')
+        try:
+            realized = float(realized_raw) if realized_raw not in (None, '') else None
+        except (TypeError, ValueError):
+            realized = None
+        notes = (t.get('notes') or '').upper()
+        is_corporate = ('A' in notes) or ('EX' in notes) or ('EP' in notes)  # Assignment / Exercise / Expired
+        has_realized = realized is not None and realized != 0
+
+        symbol = t.get('symbol', 'OTHER')
+        cat = (t.get('assetCategory') or 'OTHER').upper()
         pos = holdings[symbol]
-        # 交易方向与当前持仓方向相反，视为减少持仓（平仓）
-        is_closing = pos != 0 and (qty > 0) != (pos > 0)
+        direction_closing = pos != 0 and (qty > 0) != (pos > 0)
+        is_closing = direction_closing or has_realized or is_corporate
+
         if is_closing:
-            closed_qty = min(abs(qty), abs(pos))
-            closing_mtm = mtm * (closed_qty / abs(qty)) if qty != 0 else 0
+            if realized is not None:
+                # IB 已经按 FIFO 算好的真实平仓盈亏（含 0），权威口径
+                closing_pnl = realized
+            elif direction_closing:
+                # IB 未填 fifo，回退按比例缩放 mtm
+                closed_qty = min(abs(qty), abs(pos))
+                closing_pnl = mtm * (closed_qty / abs(qty))
+            else:
+                closing_pnl = mtm
             closing_trades.append({
                 'symbol': symbol,
                 'assetCategory': cat,
-                'mtmPnl': closing_mtm,
+                'mtmPnl': closing_pnl,
                 'date': t.get('date')
             })
         holdings[symbol] += qty
@@ -2036,8 +2155,11 @@ def get_trade_behavior_analysis(trades):
     df['qty'] = pd.to_numeric(df.get('quantity', 0), errors='coerce').fillna(0)
     df['mtmPnl'] = pd.to_numeric(df.get('mtmPnl', 0), errors='coerce').fillna(0)
     df['realizedPnl'] = pd.to_numeric(df.get('realizedPnl', 0), errors='coerce').fillna(0)
+    if 'notes' not in df.columns:
+        df['notes'] = ''
+    df['notes'] = df['notes'].fillna('').astype(str).str.upper()
 
-    # 使用 mtmPnl 识别平仓盈亏（已有逻辑），这里做行为分析
+    # 已实现盈亏：fifo 优先 + Assignment/Exercise 旁路 pos==0
     from collections import defaultdict
     holdings = defaultdict(float)
     close_events = []
@@ -2048,11 +2170,21 @@ def get_trade_behavior_analysis(trades):
         if qty == 0:
             continue
         pos = holdings[symbol]
-        is_closing = pos != 0 and (qty > 0) != (pos > 0)
+        notes = row['notes']
+        is_corporate = ('A' in notes) or ('EX' in notes) or ('EP' in notes)
+        realized = row['realizedPnl']
+        has_realized = realized != 0
+        direction_closing = pos != 0 and (qty > 0) != (pos > 0)
+        is_closing = direction_closing or has_realized or is_corporate
         if is_closing:
-            closed_qty = min(abs(qty), abs(pos))
-            closing_mtm = row['mtmPnl'] * (closed_qty / abs(qty)) if qty != 0 else 0
-            close_events.append({'symbol': symbol, 'date': row['date'], 'mtmPnl': closing_mtm, 'assetCategory': row.get('assetCategory', 'OTHER')})
+            if has_realized:
+                closing_pnl = realized
+            elif direction_closing:
+                closed_qty = min(abs(qty), abs(pos))
+                closing_pnl = row['mtmPnl'] * (closed_qty / abs(qty))
+            else:
+                closing_pnl = row['mtmPnl']
+            close_events.append({'symbol': symbol, 'date': row['date'], 'mtmPnl': closing_pnl, 'assetCategory': row.get('assetCategory', 'OTHER')})
         holdings[symbol] += qty
 
     close_df = pd.DataFrame(close_events)
@@ -3512,6 +3644,7 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
     _option_eae = _compute('option_eae', lambda: get_option_eae_events(conn, account_id), {'events': [], 'totalEvents': 0, 'summary': {}, 'byUnderlying': []})
     _cash_opp = _compute('cash_opportunity', lambda: get_cash_opportunity(conn, account_id), {'monthly': [], 'totalCredit': 0, 'totalDebit': 0, 'totalNet': 0})
     _data_quality = _compute('data_quality', lambda: get_data_quality(conn, account_id), {'tables': []})
+    _data_quality_warning = _compute('data_quality_warning', lambda: get_data_quality_warning(conn, account_id), None)
     _realized_ytd = _compute('realized_ytd', lambda: get_realized_ytd(conn, account_id), {'ytd': 0, 'lt': 0, 'st': 0, 'asOf': None})
     change_in_nav = {
         'startingValue': round(perf_starting_value, 2),
@@ -3556,8 +3689,9 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
                 _cur.execute("SELECT symbol, price FROM market_prices")
                 mp_map = {r[0]: safe_float(r[1]) for r in _cur.fetchall() if r[1] is not None}
                 _cur.execute(
-                    "SELECT symbol, asset_type, position_value, position_value_in_base, mark_price "
-                    "FROM positions WHERE date = (SELECT MAX(date) FROM positions)"
+                    "SELECT DISTINCT symbol, asset_type, position_value, position_value_in_base, mark_price "
+                    "FROM positions p1 WHERE date = ("
+                    "SELECT MAX(date) FROM positions p2 WHERE p2.account_id = p1.account_id)"
                 )
                 delta = 0.0
                 for sym, at, pv, pv_base, mp in _cur.fetchall():
@@ -3705,6 +3839,7 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
         'optionEaeEvents': _option_eae,
         'cashOpportunity': _cash_opp,
         'dataQuality': _data_quality,
+        'dataQualityWarning': _data_quality_warning,
         'positionTimeline': position_timeline,
         'orderExecution': order_execution,
         'fxExposure': fx_exposure,

@@ -6,10 +6,6 @@ export const useDashboardStore = create((set, get) => ({
   auth: null,
   setAuth: (auth) => set({ auth }),
 
-  // Share mode
-  shareMode: null, // { token, allowedTabs, accountId } or null
-  setShareMode: (mode) => set({ shareMode: mode }),
-
   // Accounts
   accounts: [],
   currentAccount: 'combined',
@@ -148,27 +144,6 @@ export const useDashboardStore = create((set, get) => ({
 
   // Actions
   initAuth: async () => {
-    // Check share mode first
-    const urlParams = new URLSearchParams(window.location.search);
-    const shareToken = urlParams.get('share_token');
-    if (shareToken) {
-      try {
-        const cfg = await api.getShareConfig(shareToken);
-        set({
-          shareMode: {
-            token: shareToken,
-            allowedTabs: cfg.allowed_tabs || ['overview'],
-            accountId: cfg.account_id || 'combined',
-          },
-          auth: { modules: Object.fromEntries((cfg.allowed_tabs || ['overview']).map((t) => [t, true])) },
-          currentAccount: cfg.account_id || 'combined',
-        });
-      } catch (e) {
-        set({ shareMode: null, auth: null });
-      }
-      return;
-    }
-
     const token = localStorage.getItem('token');
     if (!token) {
       set({ auth: null });
@@ -184,27 +159,7 @@ export const useDashboardStore = create((set, get) => ({
   },
 
   loadAccounts: async () => {
-    // Share mode: construct a fake single account list
-    const shareMode = get().shareMode;
-    if (shareMode) {
-      const alias = shareMode.accountId;
-      const accounts = alias === 'combined'
-        ? [{ alias: 'combined', label: '全部账户', color: '#111', isDefault: true }]
-        : [{ alias, label: alias, color: '#111', isDefault: true }];
-      set({ accounts, currentAccount: alias });
-      return;
-    }
-
     const { accounts } = await api.accounts(get()._adminParams());
-    
-    // 检查 URL 中的 Admin 预览参数，优先使用
-    const urlParams = new URLSearchParams(window.location.search);
-    const previewAccount = urlParams.get('admin_preview_account');
-    if (previewAccount) {
-      set({ accounts, currentAccount: previewAccount });
-      return;
-    }
-
     set({ accounts });
     const current = get().currentAccount;
     // Only default to combined if no account is currently selected
@@ -220,8 +175,10 @@ export const useDashboardStore = create((set, get) => ({
   },
 
   _adminParams: () => {
-    // 直接检查 URL 参数，不再依赖本地 auth 状态（因为 SPA 初始化时 auth 可能还没加载完）
-    // 鉴权逻辑在后端 _resolve_preview_user_id 中处理
+    // Don't gate on auth.is_admin: initAuth resolves async and dashboard slice
+    // calls fire before it. Backend _resolve_preview_user_id already validates
+    // the caller is an admin before honoring the param, so it is safe to always
+    // forward when present.
     const params = new URLSearchParams(window.location.search);
     const previewUser = params.get('admin_preview_user');
     if (previewUser) {
@@ -230,26 +187,11 @@ export const useDashboardStore = create((set, get) => ({
     return '';
   },
 
-  _shareParams: () => {
-    const params = new URLSearchParams(window.location.search);
-    const shareToken = params.get('share_token');
-    if (shareToken) {
-      return `?share_token=${encodeURIComponent(shareToken)}`;
-    }
-    return '';
-  },
-
   loadOverview: async (alias) => {
     const target = alias || get().currentAccount;
-    const shareMode = get().shareMode;
     set({ loading: true, error: null });
     try {
-      let payload;
-      if (shareMode) {
-        payload = await api.shareDashboard(shareMode.token, target);
-      } else {
-        payload = await api.dashboardOverview(target, get()._adminParams());
-      }
+      const payload = await api.dashboardOverview(target, get()._adminParams());
       set((s) => ({
         data: { ...(s.data || {}), ...payload },
         loading: false,
@@ -262,13 +204,14 @@ export const useDashboardStore = create((set, get) => ({
 
   loadTabData: async (tab, alias) => {
     const target = alias || get().currentAccount;
-    const shareMode = get().shareMode;
     const sliceMap = {
       overview: 'overview',
       positions: 'positions',
       performance: 'performance',
       details: 'details',
-      changes: 'changes'
+      changes: 'changes',
+      tax: 'tax',
+      chengji: 'chengji'
     };
     const sliceName = sliceMap[tab];
     if (!sliceName) return;
@@ -284,20 +227,20 @@ export const useDashboardStore = create((set, get) => ({
     set((s) => ({ tabLoading: { ...s.tabLoading, [tab]: true } }));
     try {
       let payload;
-      if (shareMode) {
-        payload = await api.shareDashboardSlice(shareMode.token, target, sliceName);
-      } else {
-        if (tab === 'overview') {
-          payload = await api.dashboardOverview(target, get()._adminParams());
-        } else if (tab === 'positions') {
-          payload = await api.dashboardPositions(target, get()._adminParams());
-        } else if (tab === 'performance') {
-          payload = await api.dashboardPerformance(target, get()._adminParams());
-        } else if (tab === 'details') {
-          payload = await api.dashboardDetails(target, get()._adminParams());
-        } else if (tab === 'changes') {
-          payload = await api.dashboardChanges(target, get()._adminParams());
-        }
+      if (tab === 'overview') {
+        payload = await api.dashboardOverview(target, get()._adminParams());
+      } else if (tab === 'positions') {
+        payload = await api.dashboardPositions(target, get()._adminParams());
+      } else if (tab === 'performance') {
+        payload = await api.dashboardPerformance(target, get()._adminParams());
+      } else if (tab === 'details') {
+        payload = await api.dashboardDetails(target, get()._adminParams());
+      } else if (tab === 'changes') {
+        payload = await api.dashboardChanges(target, get()._adminParams());
+      } else if (tab === 'tax') {
+        payload = await api.dashboardTax(target, get()._adminParams());
+      } else if (tab === 'chengji') {
+        payload = await api.dashboardChengji(target, get()._adminParams());
       }
       set((s) => ({
         data: { ...(s.data || {}), ...payload },

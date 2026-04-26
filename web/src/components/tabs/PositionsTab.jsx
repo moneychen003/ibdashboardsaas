@@ -6,6 +6,7 @@ import PositionTimeline from '../PositionTimeline';
 import RiskRadar from '../RiskRadar';
 import CorporateActionTimeline from '../CorporateActionTimeline';
 import OptionsStrategyLens from '../OptionsStrategyLens';
+import { ConcentrationAndAssetType } from '../PositionInsights';
 
 function Card({ title, children }) {
   return (
@@ -107,22 +108,36 @@ function PositionPie({ positions, mode, totalCash, baseCurrency }) {
       radius: ['40%', '70%'],
       center: ['38%', '50%'],
       data,
+      minAngle: 2,
+      avoidLabelOverlap: true,
       label: {
         show: true,
-        formatter: '{b}\n{d}%',
+        position: 'outside',
+        formatter: (p) => p.percent >= 3 ? `${p.name}  ${p.percent}%` : '',
         fontSize: 11,
-        color: '#333',
+        color: '#3f3f46',
+        lineHeight: 14,
       },
+      labelLine: {
+        show: true,
+        length: 10,
+        length2: 14,
+        smooth: true,
+        lineStyle: { color: '#a1a1aa', width: 1 },
+      },
+      labelLayout: { hideOverlap: true },
       emphasis: {
-        label: { show: true, fontSize: 12, fontWeight: 'bold' },
-        itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' },
+        scale: true,
+        scaleSize: 6,
+        label: { fontSize: 12, fontWeight: 'bold' },
+        itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.3)' },
       },
     }],
   };
 
   return (
-    <div style={{ height: 280, position: 'relative' }}>
-      <ECharts option={option} style={{ height: 280 }} />
+    <div style={{ height: 340, position: 'relative' }}>
+      <ECharts option={option} style={{ height: 340 }} />
     </div>
   );
 }
@@ -422,6 +437,7 @@ export default function PositionsTab() {
             ))}
           </div>
           <PositionPie positions={allPositions} mode={pieMode} totalCash={totalCash} baseCurrency={baseCurrency} />
+          <ConcentrationAndAssetType data={data} />
         </Card>
         <Card title="持仓概览">
           <PositionPieStats positions={allPositions} mode={pieMode} totalCash={totalCash} baseCurrency={baseCurrency} />
