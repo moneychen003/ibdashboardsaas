@@ -165,6 +165,7 @@ def get_flow_series(conn, account_id=None):
                 "COALESCE(CAST(NULLIF(fx_rate_to_base,'') AS REAL), 1)) "
                 "FROM archive_cash_transaction WHERE stmt_account_id = ? "
                 "AND type = 'Deposits/Withdrawals' "
+                "AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '') "
                 "AND settle_date IS NOT NULL AND settle_date <> '' "
                 "GROUP BY settle_date",
                 (account_id,))
@@ -173,6 +174,7 @@ def get_flow_series(conn, account_id=None):
                 "SELECT settle_date, SUM(CAST(amount AS REAL) * "
                 "COALESCE(CAST(NULLIF(fx_rate_to_base,'') AS REAL), 1)) "
                 "FROM archive_cash_transaction WHERE type = 'Deposits/Withdrawals' "
+                "AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '') "
                 "AND settle_date IS NOT NULL AND settle_date <> '' GROUP BY settle_date")
         for sd, flow_sum in cursor.fetchall():
             if not sd:
@@ -2636,12 +2638,13 @@ def get_cashflow_waterfall(conn, account_id=None):
     """资金流水瀑布图数据"""
     cursor = conn.cursor()
     sql = '''
-        SELECT 
+        SELECT
             activity_description,
             COALESCE(SUM(CAST(debit AS REAL)), 0),
             COALESCE(SUM(CAST(credit AS REAL)), 0)
         FROM archive_statement_of_funds_line
         WHERE {where} AND activity_description != ''
+          AND level_of_detail = 'BaseCurrency'
         GROUP BY activity_description
     '''
     if account_id:
@@ -2667,6 +2670,7 @@ def get_dividends(conn, account_id=None, limit=2000):
         SELECT report_date, symbol, description, amount, currency, type
         FROM archive_cash_transaction
         WHERE {where} AND type IN ('Dividends', 'Payment In Lieu Of Dividends', 'Broker Interest Received', 'Bond Interest Received')
+          AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '')
         ORDER BY report_date DESC
         LIMIT ?
     '''
@@ -2689,6 +2693,7 @@ def get_cash_transactions(conn, account_id=None, limit=2000):
         SELECT report_date, symbol, description, amount, currency, type
         FROM archive_cash_transaction
         WHERE {where}
+          AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '')
         ORDER BY report_date DESC
         LIMIT ?
     '''
@@ -2738,6 +2743,7 @@ def get_corporate_actions(conn, account_id=None, limit=2000):
         SELECT report_date, symbol, type, description, action_description, quantity, proceeds, value
         FROM archive_corporate_action
         WHERE {where}
+          AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '')
         ORDER BY report_date DESC
         LIMIT ?
     '''
@@ -2829,6 +2835,7 @@ def get_stmt_funds(conn, account_id=None, limit=3000):
         SELECT date, symbol, activity_description, debit, credit, balance, trade_gross, currency, amount
         FROM archive_statement_of_funds_line
         WHERE {where}
+          AND level_of_detail = 'Currency'
         ORDER BY date DESC
         LIMIT ?
     '''

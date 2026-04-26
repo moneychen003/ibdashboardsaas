@@ -119,6 +119,7 @@ def get_position_timeline(conn, account_id=None):
         SELECT symbol, date_time, action_description, CAST(amount AS REAL)
         FROM archive_corporate_action
         WHERE {where} AND symbol IN ({placeholders}) AND date_time IS NOT NULL AND date_time != ''
+          AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '')
         ORDER BY symbol, date_time
     ''', params + tuple(symbols))
 
@@ -405,6 +406,7 @@ def get_slb_income(conn, account_id=None):
         cursor.execute('''
             SELECT CAST(collateral_amount AS REAL) FROM archive_slb_open_contract
             WHERE stmt_account_id = ? AND symbol = ?
+              AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '')
             ORDER BY stmt_date DESC LIMIT 1
         ''', (account_id or '', sym))
         _row = cursor.fetchone()
@@ -424,6 +426,7 @@ def get_slb_income(conn, account_id=None):
         FROM archive_slb_open_contract
         WHERE {where}
           AND stmt_date = (SELECT MAX(stmt_date) FROM archive_slb_open_contract WHERE {where})
+          AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '')
     ''', params + params)
     current = []
     for sym, qty, coll, rate, curr in cursor.fetchall():
@@ -458,6 +461,7 @@ def get_enhanced_cashflow(conn, account_id=None):
         SELECT SUBSTR(date_time, 1, 6) as month, type, SUM(CAST(amount AS REAL)) as amt
         FROM archive_cash_transaction
         WHERE {where} AND date_time IS NOT NULL AND date_time != '' AND type IS NOT NULL AND type != ''
+          AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '')
         GROUP BY month, type
         ORDER BY month, type
     ''', params)
@@ -670,6 +674,7 @@ def get_dividend_tracker(conn, account_id=None):
         SELECT pay_date, symbol, CAST(gross_amount AS REAL), CAST(net_amount AS REAL), currency
         FROM archive_change_in_dividend_accrual
         WHERE {where} AND pay_date IS NOT NULL AND pay_date != ''
+          AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '')
         ORDER BY pay_date DESC
     ''', params)
     history = []
@@ -709,6 +714,7 @@ def get_dividend_tracker(conn, account_id=None):
         SELECT symbol, SUM(CAST(net_amount AS REAL)) as annual_net
         FROM archive_change_in_dividend_accrual
         WHERE {where} AND pay_date >= DATE('now', '-1 year')
+          AND (level_of_detail = 'DETAIL' OR level_of_detail IS NULL OR level_of_detail = '')
         GROUP BY symbol
     ''', params)
     yields = []
