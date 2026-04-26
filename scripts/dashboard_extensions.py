@@ -1086,23 +1086,55 @@ def get_wash_sale_alerts(conn, account_id=None):
 # ------------------------------------------------------------------
 # 14. Options Strategy Lens
 # ------------------------------------------------------------------
+def _parse_occ_symbol(symbol):
+    """Parse OCC option symbol like 'MU    270115P00370000'.
+    Returns (underlying, expiry_yyyymmdd, put_call, strike) or (None,None,None,None)."""
+    import re
+    if not symbol:
+        return None, None, None, None
+    m = re.match(r'^([A-Z]+)\s+(\d{6})([PC])(\d{8})$', symbol.strip())
+    if not m:
+        return None, None, None, None
+    underlying, yymmdd, pc, strike8 = m.groups()
+    yy = int(yymmdd[:2])
+    expiry = ('20' if yy < 50 else '19') + yymmdd
+    return underlying, expiry, pc, int(strike8) / 1000.0
+
+
 def get_options_strategy_lens(conn, account_id=None):
     cursor = conn.cursor()
     where = _acc_clause(account_id, 'stmt_account_id')
     params = _acc_params(account_id)
 
-    # Current option positions
+    # Current option positions — detect via multiple signals because IB Flex output
+    # may leave asset_category/put_call NULL on owner-style sparse rows. Fall back to
+    # OCC symbol pattern (LENGTH>15 with internal spaces) and description trailing 'P'/'C'.
     cursor.execute(f'''
         SELECT symbol, description, put_call, CAST(strike AS REAL), expiry, CAST(position AS REAL),
                CAST(position_value AS REAL), CAST(mark_price AS REAL), underlying_symbol, multiplier
         FROM archive_open_position
-        WHERE {where} AND (asset_category = 'OPT' OR asset_category = 'OPTION')
+        WHERE {where}
           AND stmt_date = (SELECT MAX(stmt_date) FROM archive_open_position WHERE {where})
+          AND (level_of_detail = 'SUMMARY' OR level_of_detail IS NULL OR level_of_detail = '')
+          AND (
+            UPPER(COALESCE(asset_category,'')) IN ('OPT', 'OPTION')
+            OR UPPER(COALESCE(put_call,'')) IN ('P', 'C')
+            OR (LENGTH(symbol) > 15 AND symbol LIKE '%  %')
+            OR description LIKE '% P'
+            OR description LIKE '% C'
+          )
     ''', params + params)
 
     strategies = []
     expiry_calendar = defaultdict(list)
     for sym, desc, pc, strike, exp, qty, pv, mp, under, mult in cursor.fetchall():
+        # Fallback: parse missing fields from OCC symbol
+        if not pc or not strike or not exp or not under:
+            occ_under, occ_exp, occ_pc, occ_strike = _parse_occ_symbol(sym)
+            pc = pc or occ_pc
+            strike = strike or occ_strike
+            exp = exp or occ_exp
+            under = under or occ_under
         strategy = 'OTHER'
         qty_num = safe_float(qty) or 0
         if 'COVERED' in (desc or '').upper() or qty_num > 0 and pc == 'C':
