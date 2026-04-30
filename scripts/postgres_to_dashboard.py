@@ -307,6 +307,20 @@ def _normalize_currencies_in_sqlite(conn_sql, user_id):
                 f"WHERE account_id = ?",
                 (factor, acc_id))
 
+    # Step 4b: 更新 archive_account_information.currency 为目标币种，
+    # 避免 sqlite_to_dashboard 聚合层重复换算（双层防线协调）。
+    for acc_id in conversion_factors:
+        cur.execute(
+            "UPDATE archive_account_information SET currency = ? "
+            "WHERE stmt_account_id = ?", (target, acc_id))
+        # 同时更新 archive_equity_summary_by_report_date_in_base 的 currency 列（如有）
+        try:
+            cur.execute(
+                "UPDATE archive_equity_summary_by_report_date_in_base "
+                "SET currency = ? WHERE stmt_account_id = ?", (target, acc_id))
+        except sqlite3.OperationalError:
+            pass
+
     # Step 5: 归档 open_position 的 position_value / fifo_pnl_unrealized
     # 是证券交易币种（如美股是 USD），不是账户本币，跳过不换算。
     # 合并视图的跨币种换算由 sqlite_to_dashboard 聚合层处理。
