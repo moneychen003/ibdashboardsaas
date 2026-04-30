@@ -82,6 +82,62 @@ def _load_config():
 _CONFIG_BASE_CURRENCY, _CONFIG_FX_OVERRIDES = _load_config()
 
 
+def _get_account_currencies(conn):
+    """返回 {account_id: base_currency}，用于合并视图跨币种换算。"""
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT stmt_account_id, currency FROM archive_account_information
+            WHERE currency IS NOT NULL AND currency != ''
+            ORDER BY stmt_date DESC
+        ''')
+    except sqlite3.OperationalError:
+        return {}
+    result = {}
+    for acc, curr in cursor.fetchall():
+        if acc not in result:
+            result[acc] = curr.upper() if curr else curr
+    return result
+
+
+def _get_currency_conversion_map(conn, target_currency):
+    """返回 {from_currency: rate_to_target} 换算表。target_currency 自身 rate=1.0。"""
+    cursor = conn.cursor()
+    rates = {}
+    try:
+        # 正向：from_currency -> target_currency
+        cursor.execute('''
+            SELECT from_currency, rate FROM archive_conversion_rate
+            WHERE to_currency = ?
+            ORDER BY stmt_date DESC
+        ''', (target_currency,))
+        for curr, rate in cursor.fetchall():
+            if curr and curr not in rates:
+                try:
+                    rates[curr.upper()] = float(rate)
+                except (ValueError, TypeError):
+                    pass
+        # 反向：target_currency -> some_currency，取倒数
+        cursor.execute('''
+            SELECT to_currency, rate FROM archive_conversion_rate
+            WHERE from_currency = ?
+            ORDER BY stmt_date DESC
+        ''', (target_currency,))
+        for curr, rate in cursor.fetchall():
+            curr_up = curr.upper() if curr else ''
+            if curr_up and curr_up not in rates:
+                try:
+                    r = float(rate)
+                    if r != 0:
+                        rates[curr_up] = 1.0 / r
+                except (ValueError, TypeError):
+                    pass
+    except sqlite3.OperationalError:
+        pass
+    rates[target_currency] = 1.0
+    return rates
+
+
 def get_nav_history(conn, account_id=None, start_date=None):
     """获取净值历史。account_id=None 时返回合并视图"""
     cursor = conn.cursor()
@@ -91,13 +147,22 @@ def get_nav_history(conn, account_id=None, start_date=None):
             WHERE account_id = ? AND date >= ? ORDER BY date
         ''', (account_id, start_date or '1900-01-01'))
     else:
+        target_currency = get_base_currency(conn, None)
+        account_currencies = _get_account_currencies(conn)
+        fx_map = _get_currency_conversion_map(conn, target_currency)
         cursor.execute('''
-            SELECT date, SUM(ending_value) 
-            FROM daily_nav 
+            SELECT date, account_id, ending_value
+            FROM daily_nav
             WHERE date >= ?
-            GROUP BY date 
-            ORDER BY date
+            ORDER BY date, account_id
         ''', (start_date or '1900-01-01',))
+        date_sums = {}
+        for date, acc, ending in cursor.fetchall():
+            acc_curr = account_currencies.get(acc, target_currency)
+            rate = fx_map.get(acc_curr, 1.0)
+            converted = float(ending or 0) * rate
+            date_sums[date] = date_sums.get(date, 0) + converted
+        return [{'date': d, 'nav': round(v, 2)} for d, v in sorted(date_sums.items())]
     return [{'date': row[0], 'nav': round(row[1], 2)} for row in cursor.fetchall()]
 
 
@@ -106,16 +171,29 @@ def get_all_nav_history(conn, account_id=None):
     if account_id:
         cursor.execute('SELECT date, ending_value FROM daily_nav WHERE account_id = ? ORDER BY date', (account_id,))
     else:
+        target_currency = get_base_currency(conn, None)
+        account_currencies = _get_account_currencies(conn)
+        fx_map = _get_currency_conversion_map(conn, target_currency)
         cursor.execute('''
-            SELECT d.date, SUM(d.ending_value)
-            FROM daily_nav d
-            WHERE d.account_id NOT IN (
-                SELECT DISTINCT account_id FROM daily_nav
-                WHERE date = (SELECT MAX(date) FROM daily_nav)
-                AND ABS(ending_value) < 1
-            )
-            GROUP BY d.date ORDER BY d.date
+            SELECT DISTINCT account_id FROM daily_nav
+            WHERE date = (SELECT MAX(date) FROM daily_nav)
+            AND ABS(ending_value) < 1
         ''')
+        exclude_accounts = {r[0] for r in cursor.fetchall()}
+        cursor.execute('''
+            SELECT d.date, d.account_id, d.ending_value
+            FROM daily_nav d
+            ORDER BY d.date, d.account_id
+        ''')
+        date_sums = {}
+        for date, acc, ending in cursor.fetchall():
+            if acc in exclude_accounts:
+                continue
+            acc_curr = account_currencies.get(acc, target_currency)
+            rate = fx_map.get(acc_curr, 1.0)
+            converted = float(ending or 0) * rate
+            date_sums[date] = date_sums.get(date, 0) + converted
+        return [{'date': d, 'nav': round(v, 2)} for d, v in sorted(date_sums.items())]
     return [{'date': row[0], 'nav': round(row[1], 2)} for row in cursor.fetchall()]
 
 
@@ -215,6 +293,9 @@ def get_flow_series(conn, account_id=None):
             prev_ending = ending_val
         return result
     else:
+        target_currency = get_base_currency(conn, None)
+        account_currencies = _get_account_currencies(conn)
+        fx_map = _get_currency_conversion_map(conn, target_currency)
         cursor.execute('SELECT date, account_id, ending_value, twr FROM daily_nav ORDER BY date, account_id')
         rows = cursor.fetchall()
         cursor.execute('''
@@ -234,7 +315,11 @@ def get_flow_series(conn, account_id=None):
         prev_accounts = {}
         for date in sorted(date_map.keys()):
             accounts = date_map[date]
-            combined_ending = sum(float(v[0] or 0) for v in accounts.values())
+            combined_ending = 0.0
+            for acc, (ending, _twr) in accounts.items():
+                acc_curr = account_currencies.get(acc, target_currency)
+                rate = fx_map.get(acc_curr, 1.0)
+                combined_ending += float(ending or 0) * rate
             if not prev_accounts:
                 flow = 0.0
             elif has_cin:
@@ -246,10 +331,12 @@ def get_flow_series(conn, account_id=None):
                         continue
                     ending_acc, twr_acc = accounts[acc]
                     prev_ending_val = float(prev_ending or 0)
+                    acc_curr = account_currencies.get(acc, target_currency)
+                    rate = fx_map.get(acc_curr, 1.0)
                     if twr_acc is None:
-                        expected += prev_ending_val
+                        expected += prev_ending_val * rate
                     else:
-                        expected += prev_ending_val * (1 + float(twr_acc) / 100)
+                        expected += prev_ending_val * rate * (1 + float(twr_acc) / 100)
                 flow = combined_ending - expected
             result.append((date, flow, combined_ending))
             prev_accounts = {acc: (v[0], v[1]) for acc, v in accounts.items()}
@@ -276,17 +363,8 @@ def get_nav_history_with_metrics(conn, account_id=None):
         ''', (account_id,))
         nav_rows = cursor.fetchall()
     else:
-        cursor.execute('''
-            SELECT date, SUM(ending_value)
-            FROM daily_nav
-            WHERE account_id NOT IN (
-                SELECT DISTINCT account_id FROM daily_nav
-                WHERE date = (SELECT MAX(date) FROM daily_nav)
-                AND ABS(ending_value) < 1
-            )
-            GROUP BY date ORDER BY date
-        ''')
-        nav_rows = cursor.fetchall()
+        # 合并视图复用 flow_series 中已做跨币种换算的 combined_ending
+        nav_rows = [(d, e) for d, f, e in flow_series]
     if not nav_rows:
         return [], [], []
 
@@ -718,12 +796,15 @@ def get_tax_view(conn, account_id=None):
 
     for sym, acc, at, qty, cb_price_pos, mp, pv_base, mp_base in pos_rows:
         qty = float(qty or 0)
+        # IB Flex output sometimes leaves positions.quantity NULL (sparse rows).
+        # Fall back to cost_basis_history.total_qty so owner-style accounts still report.
+        cb_total_qty, cb_total_cost = cb_map.get((sym, acc), (0, 0))
+        if qty == 0 and cb_total_qty:
+            qty = float(cb_total_qty)
         mp = float(mp or 0)
         pv_base = float(pv_base or 0)
         if qty == 0 or mp == 0:
             continue
-        # 优先从 cost_basis_history 取成本，否则用 positions.cost_basis_price
-        cb_total_qty, cb_total_cost = cb_map.get((sym, acc), (0, 0))
         if cb_total_qty and cb_total_cost:
             cb_price = cb_total_cost / cb_total_qty
         elif cb_price_pos:
@@ -1295,6 +1376,9 @@ def get_latest_positions(conn, account_id=None):
         ''', (account_id, account_id))
         processed_rows = cursor.fetchall()
     else:
+        target_currency = get_base_currency(conn, None)
+        account_currencies = _get_account_currencies(conn)
+        cross_fx = _get_currency_conversion_map(conn, target_currency)
         cursor.execute('SELECT DISTINCT account_id FROM positions')
         accounts = [r[0] for r in cursor.fetchall() if r[0]]
         # Global latest date across all positions for staleness filtering
@@ -1302,6 +1386,8 @@ def get_latest_positions(conn, account_id=None):
         global_max_date = cursor.fetchone()[0]
         agg = {}
         for acc in accounts:
+            acc_curr = account_currencies.get(acc, target_currency)
+            acc_rate = cross_fx.get(acc_curr, 1.0)
             cursor.execute('SELECT MAX(date) FROM positions WHERE account_id = ?', (acc,))
             max_date = cursor.fetchone()[0]
             if not max_date:
@@ -1349,6 +1435,9 @@ def get_latest_positions(conn, account_id=None):
                 cbp_local = safe_float(row[10]) if row[10] is not None else 0
                 fpu_local = safe_float(row[11]) if row[11] is not None else 0
 
+                # 跨币种换算：将账户本位币的 pv 转到目标展示货币
+                pv_in_target = pv * acc_rate
+
                 existing = agg.get(symbol)
                 if existing is None:
                     agg[symbol] = {
@@ -1357,7 +1446,7 @@ def get_latest_positions(conn, account_id=None):
                         'assetType': row[2],
                         'positionValue': pv_local,
                         'markPrice': mp_local,
-                        'positionValueInBase': pv,
+                        'positionValueInBase': pv_in_target,
                         '_qty': qty,
                         'currency': currency,
                         'costBasisMoney': cbm_local,
@@ -1366,7 +1455,7 @@ def get_latest_positions(conn, account_id=None):
                     }
                 else:
                     existing['positionValue'] += pv_local
-                    existing['positionValueInBase'] = existing.get('positionValueInBase', 0) + pv
+                    existing['positionValueInBase'] = existing.get('positionValueInBase', 0) + pv_in_target
                     existing['costBasisMoney'] += cbm_local
                     existing['fifoPnlUnrealized'] += fpu_local
                     existing['_qty'] += qty
@@ -1548,15 +1637,34 @@ def get_performance(conn, account_id=None, latest_date=None):
         row = cursor.fetchone()
         twr_val = row[7] or 0 if row else 0
     else:
+        target_currency = get_base_currency(conn, None)
+        account_currencies = _get_account_currencies(conn)
+        fx_map = _get_currency_conversion_map(conn, target_currency)
         cursor.execute('''
-            SELECT SUM(starting_value), SUM(ending_value), SUM(mtm), SUM(realized),
-                   SUM(dividends), SUM(interest), SUM(commissions)
+            SELECT account_id, starting_value, ending_value, mtm, realized,
+                   dividends, interest, commissions
             FROM daily_nav
             WHERE date = ?
         ''', (latest_date,))
-        row = cursor.fetchone()
-        starting = safe_float(row[0]) if row else 0
-        ending = safe_float(row[1]) if row else 0
+        rows = cursor.fetchall()
+        starting = 0.0
+        ending = 0.0
+        mtm_sum = 0.0
+        realized_sum = 0.0
+        dividends_sum = 0.0
+        interest_sum = 0.0
+        commissions_sum = 0.0
+        for (acc, sv, ev, mtm_v, real_v, div_v, int_v, comm_v) in rows:
+            acc_curr = account_currencies.get(acc, target_currency)
+            rate = fx_map.get(acc_curr, 1.0)
+            starting += safe_float(sv) * rate
+            ending += safe_float(ev) * rate
+            mtm_sum += safe_float(mtm_v) * rate
+            realized_sum += safe_float(real_v) * rate
+            dividends_sum += safe_float(div_v) * rate
+            interest_sum += safe_float(int_v) * rate
+            commissions_sum += safe_float(comm_v) * rate
+        row = (starting, ending, mtm_sum, realized_sum, dividends_sum, interest_sum, commissions_sum)
         cursor.execute('''
             SELECT SUM(CAST(deposits_withdrawals AS REAL))
             FROM archive_change_in_nav
@@ -2969,22 +3077,44 @@ def safe_float(v):
 def get_balance_breakdown(conn, account_id=None):
     """从多个 archive 表提取余额明细"""
     cursor = conn.cursor()
-    
+
+    _bb_target_currency = get_base_currency(conn, None) if not account_id else None
+    _bb_account_currencies = _get_account_currencies(conn) if not account_id else {}
+    _bb_cross_fx = _get_currency_conversion_map(conn, _bb_target_currency) if not account_id else {}
+
+    def _acc_rate(acc):
+        if account_id:
+            return 1.0
+        acc_curr = _bb_account_currencies.get(acc, _bb_target_currency)
+        return _bb_cross_fx.get(acc_curr, 1.0)
+
     def get_net_liquidation(acc):
         if acc:
             cursor.execute('SELECT ending_value FROM daily_nav WHERE account_id = ? ORDER BY date DESC LIMIT 1', (acc,))
+            row = cursor.fetchone()
+            return safe_float(row[0]) if row else 0.0
         else:
             # Combined: sum each account's latest ending_value (accounts may have
             # different max dates; do NOT require the global MAX(date)).
             cursor.execute('''
-                SELECT COALESCE(SUM(d.ending_value), 0)
+                SELECT d.account_id, d.ending_value
                 FROM daily_nav d
                 JOIN (
                     SELECT account_id, MAX(date) AS mx FROM daily_nav GROUP BY account_id
                 ) latest ON latest.account_id = d.account_id AND latest.mx = d.date
             ''')
-        row = cursor.fetchone()
-        return safe_float(row[0]) if row else 0.0
+            rows = cursor.fetchall()
+            if not rows:
+                return 0.0
+            target_currency = get_base_currency(conn, None)
+            account_currencies = _get_account_currencies(conn)
+            fx_map = _get_currency_conversion_map(conn, target_currency)
+            total = 0.0
+            for acc_id, ending in rows:
+                acc_curr = account_currencies.get(acc_id, target_currency)
+                rate = fx_map.get(acc_curr, 1.0)
+                total += safe_float(ending) * rate
+            return total
     
     def get_open_pos_breakdown(acc):
         etf_symbols = {'QQQ', 'QQQM', 'QQQI', 'SPY', 'SPYM', 'VOO', 'SGOV', 'SOXX', 'EWY', 'JEPI', 'BOXX'}
@@ -3088,7 +3218,7 @@ def get_balance_breakdown(conn, account_id=None):
                             curr = 'USD'
                         fx = fx_map.get(curr, 1.0)
                     val = safe_float(position_value) * fx if position_value else 0.0
-                    breakdown[cat] = breakdown.get(cat, 0.0) + val
+                    breakdown[cat] = breakdown.get(cat, 0.0) + val * _acc_rate(a)
                     total_unrealized += safe_float(fifo_pnl_unrealized) if fifo_pnl_unrealized else 0.0
             return breakdown, total_unrealized
     
@@ -3123,10 +3253,11 @@ def get_balance_breakdown(conn, account_id=None):
                 row = cursor.fetchone()
                 if not row:
                     continue
+                rate = _acc_rate(a)
                 for f, v in zip(fields, row):
-                    result[f] = result.get(f, 0.0) + safe_float(v)
+                    result[f] = result.get(f, 0.0) + safe_float(v) * rate
             return result
-    
+
     def get_cash_by_currency(acc):
         # 获取各币种现金
         if acc:
@@ -3586,11 +3717,19 @@ def generate_dashboard_data(conn, account_id=None, label='COMBINED'):
         _cur = conn.cursor()
         if account_id:
             _cur.execute("SELECT date, CAST(mtm AS REAL)+CAST(realized AS REAL)+CAST(dividends AS REAL)+CAST(interest AS REAL)+CAST(commissions AS REAL) FROM daily_nav WHERE account_id = ?", (account_id,))
+            for _d, _p in _cur.fetchall():
+                if _d is not None:
+                    flex_pnl_map[_d] = float(_p or 0)
         else:
-            _cur.execute("SELECT date, SUM(CAST(mtm AS REAL)+CAST(realized AS REAL)+CAST(dividends AS REAL)+CAST(interest AS REAL)+CAST(commissions AS REAL)) FROM daily_nav GROUP BY date")
-        for _d, _p in _cur.fetchall():
-            if _d is not None:
-                flex_pnl_map[_d] = float(_p or 0)
+            target_currency = get_base_currency(conn, None)
+            account_currencies = _get_account_currencies(conn)
+            fx_map = _get_currency_conversion_map(conn, target_currency)
+            _cur.execute("SELECT date, account_id, CAST(mtm AS REAL)+CAST(realized AS REAL)+CAST(dividends AS REAL)+CAST(interest AS REAL)+CAST(commissions AS REAL) FROM daily_nav ORDER BY date, account_id")
+            for _d, _acc, _p in _cur.fetchall():
+                if _d is not None:
+                    acc_curr = account_currencies.get(_acc, target_currency)
+                    rate = fx_map.get(acc_curr, 1.0)
+                    flex_pnl_map[_d] = flex_pnl_map.get(_d, 0) + float(_p or 0) * rate
     except Exception:
         flex_pnl_map = {}
     daily_pnl = _compute('daily_pnl', lambda: get_daily_pnl(nav_all, flow_map, flex_pnl_map), [])

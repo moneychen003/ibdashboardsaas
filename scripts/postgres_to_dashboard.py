@@ -164,8 +164,195 @@ def _sync_account_to_temp_sqlite(user_id: str, account_id: str, is_combined: boo
 
         conn_sql.commit()
 
+    # 多账户不同本币时归一化到同一目标币种
+    if is_combined:
+        _normalize_currencies_in_sqlite(conn_sql, user_id)
+
     cur_sql.execute("PRAGMA foreign_keys = ON")
     return conn_sql
+
+
+def _normalize_currencies_in_sqlite(conn_sql, user_id):
+    """多账户跨币种归一化。
+
+    当用户有不同本币的账户（如 HKD + USD）时，各账户 daily_nav 等表的
+    金额以各自本币计价。直接 SUM 会得到无意义的混合币种数字。
+    这里在内存 SQLite 中把非目标币种账户的金额字段统一换算到目标币种。
+    """
+    cur = conn_sql.cursor()
+
+    # Step 1: 每个账户的本币
+    cur.execute("""
+        SELECT a.stmt_account_id, a.currency
+        FROM archive_account_information a
+        JOIN (
+            SELECT stmt_account_id, MAX(stmt_date) AS max_date
+            FROM archive_account_information
+            WHERE currency IS NOT NULL AND currency != ''
+            GROUP BY stmt_account_id
+        ) latest
+        ON a.stmt_account_id = latest.stmt_account_id
+            AND a.stmt_date = latest.max_date
+    """)
+    account_currencies = {}
+    for row in cur.fetchall():
+        acc_id, curr = row[0], (row[1] or '').strip().upper()
+        if acc_id and curr:
+            account_currencies[acc_id] = curr
+
+    # 补充 daily_nav 中有但 archive_account_information 中没有的账户
+    cur.execute("SELECT DISTINCT account_id FROM daily_nav")
+    for (acc_id,) in cur.fetchall():
+        if acc_id and acc_id not in account_currencies:
+            cur.execute("""
+                SELECT currency FROM archive_equity_summary_by_report_date_in_base
+                WHERE stmt_account_id = ? ORDER BY report_date DESC LIMIT 1
+            """, (acc_id,))
+            row = cur.fetchone()
+            if row and row[0]:
+                account_currencies[acc_id] = str(row[0]).strip().upper()
+
+    if len(account_currencies) < 2:
+        return
+
+    unique_currencies = set(account_currencies.values())
+    if len(unique_currencies) <= 1:
+        return  # 所有账户同币种，无需处理
+
+    # Step 2: 确定目标币种
+    target = 'USD'
+    try:
+        user_base = getattr(sqlite_to_dashboard._cb_context, 'user_base_currency', None)
+        if user_base:
+            target = str(user_base).strip().upper()
+    except Exception:
+        pass
+    if target not in unique_currencies:
+        target = 'USD'  # 回退到 USD
+
+    # Step 3: 计算每个账户的转换因子
+    # IB archive_conversion_rate: from_currency → to_currency (account base)
+    # rate 含义: 1 from_currency = ? to_currency
+    # 要把 account_curr 转成 target: account_value / rate, 即 factor = 1/rate
+
+    # 硬编码常用货币对 USD 的汇率，作为 archive 表缺数据时的兜底
+    _USD_RATES = {
+        'USD': 1.0, 'HKD': 7.85, 'CNH': 7.1887, 'CNY': 7.23,
+        'EUR': 0.92, 'GBP': 0.79, 'JPY': 149.0, 'SGD': 1.34,
+        'CHF': 0.88, 'CAD': 1.37, 'AUD': 1.53, 'KRW': 1350.0,
+        'INR': 83.0, 'MXN': 17.0, 'NOK': 10.5, 'SEK': 10.3,
+        'DKK': 6.9, 'NZD': 1.63, 'ZAR': 18.0, 'TRY': 32.0,
+    }
+
+    def _get_factor_from_db(from_cur, to_cur):
+        cur.execute("""
+            SELECT c.rate FROM archive_conversion_rate c
+            JOIN (
+                SELECT stmt_account_id, MAX(stmt_date) AS max_date
+                FROM archive_conversion_rate
+                WHERE from_currency = ? AND to_currency = ?
+                GROUP BY stmt_account_id
+            ) latest ON c.stmt_account_id = latest.stmt_account_id
+                AND c.stmt_date = latest.max_date
+            WHERE c.from_currency = ? AND c.to_currency = ?
+            LIMIT 1
+        """, (from_cur, to_cur, from_cur, to_cur))
+        row = cur.fetchone()
+        if row and row[0]:
+            try:
+                return float(row[0])
+            except (ValueError, TypeError):
+                pass
+        return None
+
+    conversion_factors = {}
+    for acc_id, acc_curr in account_currencies.items():
+        if acc_curr == target:
+            continue
+
+        factor = None
+
+        # 方法1: 直接查 target → acc_curr
+        rate = _get_factor_from_db(target, acc_curr)
+        if rate and rate > 0:
+            factor = 1.0 / rate
+
+        # 方法2: 三角换算 through USD
+        if factor is None and target != 'USD' and acc_curr != 'USD':
+            acc_usd_rate = _get_factor_from_db('USD', acc_curr)
+            usd_target_rate = _get_factor_from_db('USD', target)
+            if acc_usd_rate and usd_target_rate and acc_usd_rate > 0:
+                factor = usd_target_rate / acc_usd_rate
+
+        # 方法3: 硬编码兜底
+        if factor is None:
+            acc_to_usd = _USD_RATES.get(acc_curr)
+            target_to_usd = _USD_RATES.get(target)
+            if acc_to_usd and target_to_usd and acc_to_usd > 0:
+                factor = target_to_usd / acc_to_usd
+
+        if factor is not None and abs(factor - 1.0) > 0.0001:
+            conversion_factors[acc_id] = factor
+
+    if not conversion_factors:
+        return
+
+    # Step 4: 归一化 daily_nav（核心：NAV/NetLiq/收益计算全依赖此表）
+    monetary_cols = ['ending_value', 'starting_value', 'mtm',
+                     'realized', 'dividends', 'interest', 'commissions']
+    for acc_id, factor in conversion_factors.items():
+        for col in monetary_cols:
+            cur.execute(
+                f"UPDATE daily_nav SET {col} = CAST(COALESCE({col},'0') AS REAL) * ? "
+                f"WHERE account_id = ?",
+                (factor, acc_id))
+
+    # Step 5: 归档 open_position 的 position_value / fifo_pnl_unrealized
+    # 是证券交易币种（如美股是 USD），不是账户本币，跳过不换算。
+    # 合并视图的跨币种换算由 sqlite_to_dashboard 聚合层处理。
+
+    # Step 6: 归一化 positions 表（实时持仓视角）
+    # position_value 是证券交易币种不动；position_value_in_base / mark_price_in_base 是本币需换算。
+    cur.execute("PRAGMA table_info(positions)")
+    pos2_cols = {row[1] for row in cur.fetchall()}
+    pos2_monetary = ['position_value_in_base', 'mark_price_in_base']
+    for acc_id, factor in conversion_factors.items():
+        for col in pos2_monetary:
+            if col in pos2_cols:
+                try:
+                    cur.execute(
+                        f"UPDATE positions SET {col} = "
+                        f"CAST(COALESCE({col},'0') AS REAL) * ? "
+                        f"WHERE account_id = ?",
+                        (factor, acc_id))
+                except sqlite3.OperationalError:
+                    pass
+
+    # Step 7: 归一化 archive_equity_summary_by_report_date_in_base（"in base" = 本币）
+    cur.execute("PRAGMA table_info(archive_equity_summary_by_report_date_in_base)")
+    eq_cols = {row[1] for row in cur.fetchall()}
+    eq_monetary = ['cash', 'stock', 'funds', 'bonds', 'options', 'commodities',
+                   'cfd_unrealized_pl', 'dividend_accruals', 'interest_accruals',
+                   'total', 'previous_day_equity']
+    for acc_id, factor in conversion_factors.items():
+        for col in eq_monetary:
+            if col in eq_cols:
+                try:
+                    cur.execute(
+                        f"UPDATE archive_equity_summary_by_report_date_in_base "
+                        f"SET {col} = CAST(COALESCE({col},'0') AS REAL) * ? "
+                        f"WHERE stmt_account_id = ?",
+                        (factor, acc_id))
+                except sqlite3.OperationalError:
+                    pass
+
+    # Step 8: archive_cash_report_currency 每行有独立 currency 字段，
+    # 值为该币种面额（USD 现金是 USD，HKD 现金是 HKD），不随账户本币变化。
+    # 跨账户同币种直接 SUM 即正确，无需换算。
+
+    # Step 9: cash_report 表同理，值为各币种面额，跳过不换算。
+
+    conn_sql.commit()
 
 
 def generate_dashboard_data(user_id: str, account_id: str):

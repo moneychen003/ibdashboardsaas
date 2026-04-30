@@ -757,18 +757,19 @@ DASHBOARD_SLICES = {
         "fxExposure", "slbIncome", "enhancedCashflow", "dividendTracker"
     },
     "positions": {
-        "accountId", "asOfDate", "openPositions", "optionEAE", "isDemo",
+        "accountId", "asOfDate", "baseCurrency", "openPositions", "optionEAE", "isDemo",
         "priorPeriodPositions", "netStockPositions", "slb",
         "changeInNav", "tradePnLAnalysis", "dividends", "positionAttribution",
-        "positionTimeline", "riskRadar", "optionsStrategyLens", "corporateActionImpact"
+        "positionTimeline", "riskRadar", "optionsStrategyLens", "corporateActionImpact",
+        "costBasisHoldings", "soldAnalysis", "summary", "balanceBreakdown"
     },
     "performance": {
-        "accountId", "asOfDate", "dailyPnL", "tradePnLAnalysis", "isDemo",
+        "accountId", "asOfDate", "baseCurrency", "dailyPnL", "tradePnLAnalysis", "isDemo",
         "monthlyTradeStats", "benchmarks", "mtmPerformanceSummary",
         "changeInNav", "transactionFees", "history", "monthlyReturns",
         "tradeBehavior", "costBreakdown", "leverageMetrics",
         "tradingHeatmap", "tradeRankings", "feeErosion", "timingAttribution",
-        "optionEaeEvents", "cashOpportunity"
+        "optionEaeEvents", "cashOpportunity", "trades"
     },
     "details": {
         "accountId", "asOfDate", "trades", "dividends", "cashTransactions", "isDemo",
@@ -789,7 +790,8 @@ DASHBOARD_SLICES = {
         "costBasisHoldings", "openPositions", "fxRates"
     },
     "tax": {
-        "accountId", "asOfDate", "baseCurrency", "isDemo", "taxView", "changeInNav"
+        "accountId", "asOfDate", "baseCurrency", "isDemo", "taxView", "changeInNav",
+        "costBasisHoldings"
     }
 }
 
