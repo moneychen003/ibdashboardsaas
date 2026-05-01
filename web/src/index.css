@@ -42,3 +42,35 @@ body {
 /* 2026-04-25: 移动端水平滚动隐藏滚动条 */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* === 打印样式 (Cmd+P 导出 PDF 用) === */
+@media print {
+  nav, footer, .print\:hidden,
+  [class*="fixed"][class*="bottom-0"] {
+    display: none !important;
+  }
+  main { max-width: 100% !important; padding: 0 !important; }
+  table { page-break-inside: avoid; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  body { background: white !important; }
+}
+
+/* Portfolio sidebar: reserve space for reorder arrows so text cannot collide with controls. */
+.p-3.rounded-xl.border.cursor-pointer.transition-all > .flex.items-start.gap-2 {
+  min-width: 0;
+}
+.p-3.rounded-xl.border.cursor-pointer.transition-all > .flex.items-start.gap-2 > .flex-1.min-w-0 {
+  overflow: hidden;
+  padding-right: 0.5rem;
+}
+.p-3.rounded-xl.border.cursor-pointer.transition-all > .flex.items-start.gap-2 > .flex.flex-col.gap-0\.5.opacity-30 {
+  flex: 0 0 1.25rem;
+  width: 1.25rem;
+  align-items: center;
+}
+.p-3.rounded-xl.border.cursor-pointer.transition-all > .flex.items-start.gap-2 > .flex-1.min-w-0 .text-xs {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+

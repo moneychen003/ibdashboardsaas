@@ -211,7 +211,8 @@ export const useDashboardStore = create((set, get) => ({
       details: 'details',
       changes: 'changes',
       tax: 'tax',
-      chengji: 'chengji'
+      chengji: 'chengji',
+      portfolios: 'portfolios'
     };
     const sliceName = sliceMap[tab];
     if (!sliceName) return;
@@ -241,6 +242,8 @@ export const useDashboardStore = create((set, get) => ({
         payload = await api.dashboardTax(target, get()._adminParams());
       } else if (tab === 'chengji') {
         payload = await api.dashboardChengji(target, get()._adminParams());
+      } else if (tab === 'portfolios') {
+        payload = await api.dashboardPortfolios(target, get()._adminParams());
       }
       set((s) => ({
         data: { ...(s.data || {}), ...payload },

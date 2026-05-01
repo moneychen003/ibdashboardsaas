@@ -1,6 +1,183 @@
 {
-  "currentVersion": "1.1.3",
+  "currentVersion": "1.5.0",
   "versions": [
+    {
+      "version": "1.5.0",
+      "date": "2026-04-27",
+      "title": "MCP Server + 26 个 AI Tools + 多语言升级 + Onboarding",
+      "summary": "重磅：上线 MCP server，把 IB 账户接入 Claude Desktop / Hermes / Cursor 等 AI 客户端，26 个 read-only tools 让 AI 直接查你的持仓 / 收益 / wheel / 风险 / 现金流。i18n 升级到工业级（自动检测 / 占位符 / Intl 格式化）。新增 onboarding 引导 / 账户级风险参数 / 历史持仓快照 / 浏览器原生 PDF 导出。",
+      "sections": [
+        {
+          "type": "feature",
+          "label": "🚀 重磅功能",
+          "items": [
+            "🤖 **MCP Server 上线** — `/mcp` endpoint 接入 Claude Desktop / Hermes / Cursor / 其他 MCP 客户端。一键复制配置（含 token），AI 可直接查询你的账户数据，无需手动导出 CSV。说明页 → 「AI/MCP 接入」章节有完整教程",
+            "📦 **26 个 read-only AI Tools**：account snapshot / period returns / yearly+monthly returns / holdings / portfolios / wheel cycles / option PnL / strategy breakdown / cash flow / winners-losers / drawdown periods / open options risk / position changes / sell-put suggestions / symbol full context / realtime price / compare periods / assignment history / dividends / tax summary / search / account metadata / list accounts...",
+            "🎯 **AI 杀手 Demo** — 在 Claude Desktop 问「分析我账户最近 30 天交易，哪个 wheel 表现最好，建议下周卖什么期权」AI 会自动串调 5+ 个 tool 综合给建议",
+            "📊 **历史持仓快照** — 每天 23:15 自动 snapshot 全部用户持仓，未来支持组合 NAV 时间序列、精确风险参数、近 N 天持仓变化追踪",
+            "📐 **账户级风险参数** — 组合 tab 多一张紫色「📐 风险」卡片：年化收益 / 年化波动率 / 夏普 / 索提诺 / 卡玛 / 最大回撤，绿红色按好坏阈值",
+            "👋 **首次登录 Onboarding** — 5 步介绍引导（上传 XML / 浏览 8 tab / 创建组合 / 绑定 TG / 看 Wheel + AI），localStorage 标记看过"
+          ]
+        },
+        {
+          "type": "feature",
+          "label": "🌐 多语言（i18n）大升级",
+          "items": [
+            "自动检测浏览器语言（首次访问 navigator.language）",
+            "URL 参数 `?lang=en` 临时切换",
+            "localStorage 持久化 + html lang 同步",
+            "占位符插值 `t('已添加 {n} 项', {n: 5})`",
+            "`Intl.NumberFormat` / `Intl.DateTimeFormat` locale-aware 数字日期格式",
+            "dev 模式缺失翻译 console.warn + `window.__i18n_missing__()` 查未译 keys",
+            "翻译词典扩到 250+ 字符串覆盖核心 UI",
+            "**AI 整理 prompt 跟随 locale** — 切到 EN 后 Kimi 直接输出英文方案（如「China EV & Tech Growth / US Mega-Cap Tech」）",
+            "**HelpPage 中英双版本** — 同一 URL 自动切，10 步教程 + FAQ + 数据原理整套英文化"
+          ]
+        },
+        {
+          "type": "feature",
+          "label": "📊 体验增强",
+          "items": [
+            "ECharts 替手搓 SVG（组合占比饼图 + 期权月度柱状图）— hover tooltip / 缩放 / 导出 PNG",
+            "HelpPage 加 sticky 侧边栏目录（10 步 + 数据原理章节锚点）",
+            "税务报告浏览器原生打印 — 在 TaxTab 按 Cmd+P 自动隐藏 nav/footer 干净导出 PDF",
+            "组合 tab 「再平衡建议」加跳转：加仓建议跳 us-options 带 ticker；减仓 modal 列该组合最大持仓",
+            "Wheel 追踪表新增「年化收益率」列",
+            "组合 CSV 导出按钮"
+          ]
+        },
+        {
+          "type": "perf",
+          "label": "⚡ 优化",
+          "items": [
+            "顶栏响应式 — CommunityButton 窄屏自动方形（不穿模）；nav md→lg 让 768-1024 走 mobile nav；logo 文字 lg→xl 让中等宽度容纳所有按钮",
+            "ECharts wrapper 加 onEvents 支持（饼图点击切换 active）",
+            "gunicorn worker timeout 30s → 120s（AI 整理不再卡 timeout）"
+          ]
+        },
+        {
+          "type": "fix",
+          "label": "🛠️ 修复",
+          "items": [
+            "SaaS 站 i18n 集成后白屏（lucide import 行模式不匹配）",
+            "Docs tab 一直 loading（store sliceMap 没清 tabLoading state）",
+            "ibuser 对 user_notification_logs 缺权限 → grant 修复",
+            "`get_yearly_returns` 之前 history 格式错（dict vs list）",
+            "`get_cash_flow` SQL 用了不存在的 `date` 列（改为 `stmt_date`）"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "1.4.0",
+      "date": "2026-04-27",
+      "title": "TG 推送增强 + 期权进阶 + 数据导出 + 帮助页升级",
+      "summary": "Telegram 推送加上「标的摊薄汇总」段；SaaS 用户也能收 trade 通知；期权策略可手动覆盖；Wheel 追踪显示年化收益率；组合一键导出 CSV；说明文档并入帮助页。",
+      "sections": [
+        {
+          "type": "feature",
+          "label": "新功能",
+          "items": [
+            "📨 TG 推送底部加「标的摊薄汇总」段 — 每条 trade 推送末尾显示该 underlying 累计权利金 + 实时摊薄成本",
+            "🔔 SaaS 用户也能收 trade 推送 — 每 15 min cron + 平台 bot @ibdashboard_bot 自动推送（绑定即开通）",
+            "✏️ 期权策略手动 override — 21 种策略可选，覆盖 AI 自动识别（如把 csp 强标 wheel）",
+            "🎡 Wheel 追踪显示年化收益率 — 每个 wheel underlying 净盈亏 + PUT 接股次数 + CC 行权次数 + 持有天数 + 年化",
+            "📥 组合 CSV 导出 — 顶部新按钮一键下载所有组合 + 持仓",
+            "📖 说明文档并入「帮助」页 — 右上角菜单 → 帮助，含新手教程 + 数据原理 + 路线图",
+            "💡 再平衡建议加跳转 — 加仓建议直接跳 us-options 选卖 PUT 候选"
+          ]
+        },
+        {
+          "type": "fix",
+          "label": "修复",
+          "items": [
+            "AI 整理 500 错误 — gunicorn worker timeout 30s → 120s（之前 Kimi 调用 ~25s 卡边界）",
+            "Docs tab 一直显示加载中 — store 没清 tabLoading state，直接合并到帮助页解决",
+            "expense_log 权限 — ibuser 补 user_notification_logs 的 SELECT/INSERT 权限"
+          ]
+        },
+        {
+          "type": "perf",
+          "label": "数据库",
+          "items": [
+            "新增 user_holding_strategy_overrides 表 — 存用户对期权策略的手动覆盖（独立于组合）",
+            "新增 user_portfolio_excludes 表 — 存「自动归类排除」标记（auto_rule 不再吸入）"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "1.3.0",
+      "date": "2026-04-27",
+      "title": "组合 tab 大升级：AI 整理 + 期权策略自动识别 + 摊薄轨迹",
+      "summary": "组合分页全面增强——AI 大模型智能分类、期权 16 种策略自动识别、Wheel 轮子追踪、再平衡建议、集中度风险预警、摊薄成本变动轨迹。",
+      "sections": [
+        {
+          "type": "feature",
+          "label": "新功能",
+          "items": [
+            "🤖 AI 整理 — 接入 Kimi 大模型，根据持仓特征智能推荐 4-6 个组合分类方案（按行业/风格/策略），点一下就能应用",
+            "⚡ 规则整理 — 一键创建 4 个标准组合（定投/现金/期权/个股）+ 自动归类规则",
+            "📐 期权策略自动识别 — 16 种策略：CC（备兑看涨）/ CSP（现金担保 PUT）/ 价差（牛市/熊市/PUT/CALL 共 4 种）/ 铁鹰 / 铁蝶 / 跨式 / 宽跨式 / 合成多头 / 领口 / LEAPS 看涨/看跌 / 保护性看跌 / 裸卖看涨 等",
+            "🎡 Wheel 轮子识别 — 扫历史 Assignment 事件，自动给「跑过轮子的标的」(LI/QQQ/XPEV/AAPL 等) 的 cc/csp 标紫色「轮子策略」分组",
+            "💡 再平衡建议 — 左侧自动展示每个组合「加仓 $X / 减仓 $Y」具体金额，总偏离一目了然",
+            "⚠️ 集中度风险预警 — 实时检测三类风险：单标的占比 >20%、单组合 >50%、期权空头杠杆 >2x",
+            "📊 期权月度权利金净流入图 — 期权仓位详情底部柱状图，绿/红色区分赚/赔月份，下方按底层 Top 10",
+            "🔍 摊薄成本变动轨迹 — 持仓行点 ▶ 展开，每笔交易后看到摊薄成本变化（绿色↓卖期权降摊薄 / 橙色↑接股升摊薄）",
+            "💰 三种成本对照 — 历史买入均价 / FIFO 持仓成本 / 摊薄成本三栏并列，浮盈各自计算",
+            "🎯 自动归类规则 — 每个组合可设 auto_rule（ETF/个股/期权），未来新加的对应类型持仓自动归位",
+            "⚪ 组合分布饼图 — 左侧 SVG 环形图可视化各组合占比，点击切换 active"
+          ]
+        },
+        {
+          "type": "feature",
+          "label": "数据展示",
+          "items": [
+            "组合金额统一折算到 USD 显示（不论 baseCurrency 是 CNH 还是其他）",
+            "组合内持仓按当前市值降序排列",
+            "AI 整理产生的 holdings 标紫色「AI」chip，规则归类的标「自动」chip，方便区分",
+            "AI/自动归类的 holdings 也支持删除（写入 excludes 表，不再被自动包含）"
+          ]
+        },
+        {
+          "type": "perf",
+          "label": "性能",
+          "items": [
+            "组合 slice 改为 live recompute（直接 query PG），添加/删除持仓后即时刷新（< 200ms，原 20 秒）",
+            "AI 整理请求超时延长到 120 秒（之前 30s 卡到 worker timeout）"
+          ]
+        },
+        {
+          "type": "fix",
+          "label": "修复",
+          "items": [
+            "组合 dashboard 文件 cache 不失效导致编辑后看到旧数据的问题",
+            "AI 整理后 holding 没有 source 标记的问题",
+            "期权月度图表用 fifo_pnl_realized 全 0 显示空白 → 改用 proceeds（净权利金）"
+          ]
+        }
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-04-27",
+      "title": "自定义组合：按业务用途分组持仓",
+      "summary": "新增「组合」tab，支持把 IB 持仓按定投/策略/现金等业务用途自由分组，看到目标占比 vs 实际偏离。",
+      "sections": [
+        {
+          "type": "feature",
+          "label": "新功能",
+          "items": [
+            "新增「组合」tab，可创建自定义持仓分组（如定投仓位 70% / 期权仓位 25% / 现金仓位 5%）",
+            "目标占比设置 + 实际偏离实时计算，偏离超过 5% 橙色警示",
+            "现金仓位可标记为特殊类型，自动包含 IB 账户余额",
+            "未分类持仓抽屉：搜索 + 多选批量加入组合",
+            "一码一组合（一个 symbol 同时只能属于一个组合，避免占比 >100%）",
+            "Combined 跨账户合并视图，组合是「我的资产配置」整体视角"
+          ]
+        }
+      ]
+    },
     {
       "version": "1.1.3",
       "date": "2026-04-26",

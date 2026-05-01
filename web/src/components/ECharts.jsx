@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-export default function ECharts({ option, style = {}, className = '' }) {
+export default function ECharts({ option, style = {}, className = '', onEvents }) {
   const chartRef = useRef(null);
   const instanceRef = useRef(null);
   const [echartsMod, setEchartsMod] = useState(null);
@@ -36,6 +36,11 @@ export default function ECharts({ option, style = {}, className = '' }) {
         window.addEventListener('resize', handleResize);
         if (option) {
           instanceRef.current.setOption(option, true);
+        }
+        if (onEvents) {
+          for (const [evt, handler] of Object.entries(onEvents)) {
+            try { instanceRef.current.on(evt, handler); } catch {}
+          }
         }
       } catch (e) {
         setError(e.message);

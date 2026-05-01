@@ -22,6 +22,9 @@ from flask_jwt_extended import (
 from werkzeug.utils import secure_filename
 import redis
 from rq import Queue
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db.postgres_client import get_cursor, execute, execute_one
@@ -67,7 +70,7 @@ def add_security_headers(response):
     allowed = _CORS_ORIGIN if _CORS_ORIGIN != "*" else origin
     if _CORS_ORIGIN == "*" or origin == allowed:
         response.headers["Access-Control-Allow-Origin"] = allowed
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
@@ -906,11 +909,276 @@ def api_dashboard_slice(alias, slice_name):
     payload = _generate_dashboard_for_account(target_user, alias)
     if payload is None:
         return jsonify({"error": "Data not found"}), 404
+    if slice_name == "portfolios":
+        from db import portfolios as pf
+        resp = jsonify({"portfolios": pf.build_portfolios_view(target_user, payload)})
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
     resp = jsonify(_slice_payload(payload, slice_name))
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
     return resp
+
+
+# ------------------------------------------------------------------
+# Portfolio grouping API
+# ------------------------------------------------------------------
+@app.route("/api/portfolios", methods=["GET"])
+@jwt_required()
+def api_portfolios_list():
+    from db import portfolios as pf
+    return jsonify({"portfolios": pf.list_portfolios(get_jwt_identity())})
+
+
+@app.route("/api/portfolios", methods=["POST"])
+@jwt_required()
+def api_portfolios_create():
+    from db import portfolios as pf
+    data = request.get_json(silent=True) or {}
+    try:
+        row = pf.create_portfolio(
+            get_jwt_identity(),
+            data.get("name"),
+            color=data.get("color"),
+            target_pct=data.get("targetPct", data.get("target_pct")),
+            is_cash=data.get("isCash", data.get("is_cash", False)),
+            notes=data.get("notes"),
+            auto_rule=data.get("autoRule", data.get("auto_rule")),
+        )
+        return jsonify(row)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/portfolios/<portfolio_id>", methods=["PUT"])
+@jwt_required()
+def api_portfolios_update(portfolio_id):
+    from db import portfolios as pf
+    data = request.get_json(silent=True) or {}
+    try:
+        row = pf.update_portfolio(get_jwt_identity(), portfolio_id, **data)
+        if not row:
+            return jsonify({"error": "Portfolio not found"}), 404
+        return jsonify(row)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/portfolios/<portfolio_id>", methods=["DELETE"])
+@jwt_required()
+def api_portfolios_delete(portfolio_id):
+    from db import portfolios as pf
+    ok = pf.delete_portfolio(get_jwt_identity(), portfolio_id)
+    return jsonify({"success": bool(ok)})
+
+
+@app.route("/api/portfolios/<portfolio_id>/holdings", methods=["POST"])
+@jwt_required()
+def api_portfolios_add_holdings(portfolio_id):
+    from db import portfolios as pf
+    data = request.get_json(silent=True) or {}
+    result = pf.add_holdings(get_jwt_identity(), portfolio_id, data.get("symbols") or [])
+    if result is None:
+        return jsonify({"error": "Portfolio not found"}), 404
+    status = 409 if not result.get("added") and result.get("conflicts") else 200
+    return jsonify(result), status
+
+
+@app.route("/api/portfolios/<portfolio_id>/holdings/<path:symbol>", methods=["DELETE"])
+@jwt_required()
+def api_portfolios_remove_holding(portfolio_id, symbol):
+    from db import portfolios as pf
+    user_id = get_jwt_identity()
+    removed = pf.remove_holding(user_id, portfolio_id, symbol)
+    excluded = False
+    if not removed:
+        excluded = pf.add_exclusion(user_id, portfolio_id, symbol)
+    return jsonify({"success": bool(removed or excluded), "removed": bool(removed), "excluded": bool(excluded)})
+
+
+@app.route("/api/portfolios/reorder", methods=["POST"])
+@jwt_required()
+def api_portfolios_reorder():
+    from db import portfolios as pf
+    data = request.get_json(silent=True) or {}
+    n = pf.reorder(get_jwt_identity(), data.get("ids") or [])
+    return jsonify({"success": True, "updated": n})
+
+
+@app.route("/api/portfolios/auto-setup", methods=["POST"])
+@jwt_required()
+def api_portfolios_auto_setup():
+    from db import portfolios as pf
+    pf.auto_setup(get_jwt_identity())
+    return jsonify({"success": True})
+
+
+@app.route("/api/portfolios/match-suggest", methods=["POST"])
+@jwt_required()
+def api_portfolios_match_suggest():
+    from db import portfolios as pf
+    from db import portfolios_ai
+    user_id = get_jwt_identity()
+    locale = request.args.get("locale", "zh")
+    existing = pf.list_portfolios(user_id) or []
+    if not existing:
+        return jsonify({"error": "请先创建至少一个组合后再使用 AI 匹配"}), 400
+    payload = _generate_dashboard_for_account(user_id, "combined")
+    if not payload:
+        return jsonify({"error": "No dashboard data available"}), 404
+    open_pos = payload.get("openPositions") or {}
+    positions = []
+    for bucket in ("stocks", "etfs", "options"):
+        positions.extend(open_pos.get(bucket) or [])
+    if not positions:
+        return jsonify({"error": "No positions available for AI matching"}), 400
+    custom_prompt = None
+    try:
+        row = execute_one("SELECT custom_ai_prompt FROM user_profiles WHERE user_id = %s", (user_id,))
+        if row:
+            custom_prompt = row.get("custom_ai_prompt")
+    except Exception:
+        pass
+    plan = portfolios_ai.ai_match_to_existing(
+        positions, existing_portfolios=existing, locale=locale, custom_prompt=custom_prompt
+    )
+    return jsonify({"plan": plan})
+
+
+@app.route("/api/portfolios/match-apply", methods=["POST"])
+@jwt_required()
+def api_portfolios_match_apply():
+    from db import portfolios_ai
+    data = request.get_json(silent=True) or {}
+    try:
+        result = portfolios_ai.ai_match_apply(get_jwt_identity(), data.get("plan"))
+        return jsonify({"success": True, **result})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/portfolios/clear-auto-rules", methods=["POST"])
+@jwt_required()
+def api_portfolios_clear_auto_rules():
+    from db import portfolios as pf
+    pf.clear_auto_rules(get_jwt_identity())
+    return jsonify({"success": True})
+
+
+@app.route("/api/portfolios/reset-all", methods=["POST"])
+@jwt_required()
+def api_portfolios_reset_all():
+    from db import portfolios as pf
+    pf.reset_all(get_jwt_identity())
+    return jsonify({"success": True})
+
+
+@app.route("/api/portfolios/holding-trades/<path:symbol>")
+@jwt_required()
+def api_portfolios_holding_trades(symbol):
+    from db import portfolios as pf
+    return jsonify(pf.get_holding_trades(get_jwt_identity(), symbol))
+
+
+@app.route("/api/portfolios/ai-suggest", methods=["POST"])
+@jwt_required()
+def api_portfolios_ai_suggest():
+    from db import portfolios as pf
+    from db import portfolios_ai
+    user_id = get_jwt_identity()
+    locale = request.args.get("locale", "zh")
+    payload = _generate_dashboard_for_account(user_id, "combined")
+    if not payload:
+        return jsonify({"error": "No dashboard data available"}), 404
+    open_pos = payload.get("openPositions") or {}
+    positions = []
+    for bucket in ("stocks", "etfs", "options"):
+        positions.extend(open_pos.get(bucket) or [])
+    if not positions:
+        return jsonify({"error": "No positions available for AI grouping"}), 400
+    custom_prompt = None
+    try:
+        row = execute_one("SELECT custom_ai_prompt FROM user_profiles WHERE user_id = %s", (user_id,))
+        if row:
+            custom_prompt = row.get("custom_ai_prompt")
+    except Exception:
+        pass
+    plan = portfolios_ai.ai_suggest(positions, current_portfolios=pf.list_portfolios(user_id), locale=locale, custom_prompt=custom_prompt)
+    return jsonify({"plan": plan})
+
+
+@app.route("/api/portfolios/ai-prompt", methods=["GET"])
+@jwt_required()
+def api_portfolios_ai_prompt_get():
+    user_id = get_jwt_identity()
+    row = execute_one("SELECT custom_ai_prompt FROM user_profiles WHERE user_id = %s", (user_id,))
+    return jsonify({"prompt": row.get("custom_ai_prompt") or "" if row else ""})
+
+
+@app.route("/api/portfolios/ai-prompt", methods=["PUT"])
+@jwt_required()
+def api_portfolios_ai_prompt_save():
+    user_id = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    prompt = (data.get("prompt") or "").strip()
+    execute(
+        """
+        INSERT INTO user_profiles (user_id, custom_ai_prompt) VALUES (%s, %s)
+        ON CONFLICT (user_id) DO UPDATE SET custom_ai_prompt = EXCLUDED.custom_ai_prompt
+        """,
+        (user_id, prompt or None),
+    )
+    return jsonify({"success": True})
+
+
+@app.route("/api/portfolios/ai-apply", methods=["POST"])
+@jwt_required()
+def api_portfolios_ai_apply():
+    from db import portfolios_ai
+    data = request.get_json(silent=True) or {}
+    try:
+        portfolios_ai.ai_apply(get_jwt_identity(), data.get("plan"))
+        return jsonify({"success": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/portfolios/option-pnl-timeline")
+@jwt_required()
+def api_portfolios_option_pnl_timeline():
+    from db import portfolios as pf
+    return jsonify(pf.get_option_pnl_timeline(get_jwt_identity()))
+
+
+@app.route("/api/portfolios/holdings/<path:symbol>/strategy", methods=["POST"])
+@jwt_required()
+def api_portfolios_set_strategy(symbol):
+    from db import portfolios as pf
+    data = request.get_json(silent=True) or {}
+    pf.set_strategy_override(get_jwt_identity(), symbol, data.get("override"))
+    return jsonify({"success": True})
+
+
+@app.route("/api/portfolios/wheel-cycles")
+@jwt_required()
+def api_portfolios_wheel_cycles():
+    from db import portfolios as pf
+    return jsonify(pf.get_wheel_cycles(get_jwt_identity()))
+
+
+@app.route("/api/portfolios/export.csv")
+@jwt_required()
+def api_portfolios_export_csv():
+    from db import portfolios as pf
+    csv_text = pf.export_portfolios_csv(get_jwt_identity())
+    return Response(
+        csv_text,
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=portfolios.csv"},
+    )
 
 
 # ------------------------------------------------------------------

@@ -150,7 +150,7 @@ function PositionPieStats({ positions, mode, totalCash, baseCurrency }) {
 
   const todayPnl = positions.reduce((s, p) => s + (p.dailyPnl || 0), 0);
   const unrealizedPnl = positions.reduce(
-    (s, p) => s + (p.unrealizedPnl ?? p.estimatedPnl ?? p.fifoPnlUnrealized ?? 0),
+    (s, p) => s + (p.fifoPnlUnrealizedInBase ?? p.fifoPnlUnrealized ?? p.unrealizedPnl ?? p.estimatedPnlInBase ?? p.estimatedPnl ?? 0),
     0,
   );
   const pnl = todayPnl !== 0 ? todayPnl : unrealizedPnl;
@@ -292,16 +292,13 @@ function OptionExpiry({ options }) {
   );
 }
 
-function PositionPnl({ positions, costMode }) {
+function PositionPnl({ positions }) {
   const rows = positions
     .map((p) => {
-      const costPrice = costMode === 'diluted' ? (p.dilutedCostBasisPrice || 0) : (p.avgCostBasisPrice || 0);
-      const qty = p.quantity != null ? p.quantity : (p.markPrice ? p.positionValue / p.markPrice : 0);
-      const costMoney = costPrice && qty ? costPrice * qty : (costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0));
-      const unrealized = (p.positionValue || 0) - costMoney;
+      const unrealized = p.fifoPnlUnrealizedInBase ?? p.fifoPnlUnrealized ?? 0;
       return {
         symbol: p.symbol,
-        marketValue: p.positionValue || 0,
+        marketValue: p.positionValueInBase || p.positionValue || 0,
         unrealized,
       };
     })
@@ -361,20 +358,16 @@ export default function PositionsTab() {
   const baseCurrency = data.baseCurrency || 'USD';
 
   const totalUnrealized = filteredPositions.reduce((s, p) => {
-    const costPrice = costMode === 'diluted' ? (p.dilutedCostBasisPrice || 0) : (p.avgCostBasisPrice || 0);
-    const qty = p.quantity != null ? p.quantity : (p.markPrice ? p.positionValue / p.markPrice : 0);
-    const costMoney = costPrice && qty ? costPrice * qty : (costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0));
-    return s + ((p.positionValue || 0) - costMoney);
+    return s + (p.fifoPnlUnrealizedInBase ?? p.fifoPnlUnrealized ?? 0);
   }, 0);
 
   const sortedPositions = useMemo(() => {
     const enriched = filteredPositions.map((p) => {
       const qty = p.quantity != null ? p.quantity : (p.markPrice ? p.positionValue / p.markPrice : 0);
       const costPrice = costMode === 'diluted' ? (p.dilutedCostBasisPrice || 0) : (p.avgCostBasisPrice || 0);
-      const costMoney = costPrice && qty ? costPrice * qty : (costMode === 'diluted' ? (p.dilutedCostBasisMoney || 0) : (p.avgCostBasisMoney || 0));
-      const unrealized = (p.positionValue || 0) - costMoney;
+      const unrealized = p.fifoPnlUnrealizedInBase ?? p.fifoPnlUnrealized ?? 0;
       const gainPct = costPrice ? ((p.markPrice - costPrice) / costPrice) * 100 : 0;
-      return { ...p, qty, costPrice, costMoney, unrealized, gainPct };
+      return { ...p, qty, costPrice, unrealized, gainPct };
     });
     enriched.sort((a, b) => {
       const key = sort.key;
@@ -543,7 +536,7 @@ export default function PositionsTab() {
         </div>
       </Card>
 
-      <PositionPnl positions={filteredPositions} costMode={costMode} />
+      <PositionPnl positions={filteredPositions} />
 
       <Card title="融券/借券明细 (Net Stock Position)">
         <NetStockPositionTable data={data} />

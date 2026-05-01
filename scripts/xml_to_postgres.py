@@ -148,6 +148,10 @@ def import_core_tables(cursor, user_id, stmt, statement_date, account_id):
         symbol = pos.get('symbol', '')
         if not symbol:
             continue
+        # IB Flex 同一 (date,symbol) 同时输出 SUMMARY + 多条 LOT，主键不含 levelOfDetail
+        # 跳过 LOT 行避免覆盖 SUMMARY（参考 archive_open_position SUMMARY/LOT 翻倍 bug）
+        if (pos.get('levelOfDetail') or '').upper() == 'LOT':
+            continue
         description = pos.get('description', '')
         position_value = float(pos.get('positionValue', 0) or 0)
         mark_price = float(pos.get('markPrice', 0) or 0)
@@ -284,6 +288,7 @@ def init_db_from_schema(schema):
 
 
 def run_import(user_id: str, xml_file: str, upload_id: str = None):
+    file_size = os.path.getsize(xml_file) if os.path.exists(xml_file) else 0
     with open(xml_file, 'rb') as f:
         file_md5 = hashlib.md5(f.read()).hexdigest()
     file_name = os.path.basename(xml_file)
@@ -296,17 +301,27 @@ def run_import(user_id: str, xml_file: str, upload_id: str = None):
     error_message = ''
 
     try:
+        if file_size == 0:
+            raise ValueError("EMPTY_FILE")
+
         print(f"📥 解析 XML: {xml_file}")
         tree = ET.parse(xml_file)
         root = tree.getroot()
+
+        # IB 「报表生成中」状态页：root 是 <FlexStatementResponse> + Status="Warn"
+        if root.tag == 'FlexStatementResponse' and (root.get('Status') == 'Warn' or root.findtext('Status') == 'Warn'):
+            raise ValueError("FLEX_IN_PROGRESS")
+
         statements = root.findall('.//FlexStatement')
         print(f"   发现 {len(statements)} 个 FlexStatement")
 
-        if statements:
-            date_raw = statements[0].get('toDate', '')
-            if date_raw:
-                stmt_date = f"{date_raw[:4]}-{date_raw[4:6]}-{date_raw[6:]}"
-            account_id = statements[0].get('accountId', '')
+        if not statements:
+            raise ValueError("NO_FLEXSTATEMENT_FOUND")
+
+        date_raw = statements[0].get('toDate', '')
+        if date_raw:
+            stmt_date = f"{date_raw[:4]}-{date_raw[4:6]}-{date_raw[6:]}"
+        account_id = statements[0].get('accountId', '')
 
         print("🔍 扫描 Schema...")
         schema = discover_schema(statements)
@@ -333,7 +348,11 @@ def run_import(user_id: str, xml_file: str, upload_id: str = None):
             print(f"     archive_{snake_case(tag)}: {count} 条")
 
     except Exception as e:
-        error_message = str(e)
+        try:
+            from utils.upload_errors import translate as _translate_err
+            error_message = _translate_err(str(e), file_size=file_size)
+        except Exception:
+            error_message = str(e)
         status = 'failed'
         import traceback
         traceback.print_exc()

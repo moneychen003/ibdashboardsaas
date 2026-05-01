@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 
-import { LayoutDashboard, Briefcase, TrendingUp, FileText, Receipt, Settings, HelpCircle, ChevronDown, Menu, PartyPopper, FolderUp, Upload, Sparkles, AlertTriangle, X, PieChart } from 'lucide-react';import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { LayoutDashboard, Briefcase, TrendingUp, FileText, RefreshCw, Receipt, Settings, HelpCircle, ChevronDown, Menu, PartyPopper, FolderUp, Upload, Sparkles, Trophy, AlertTriangle, X, PieChart } from 'lucide-react';import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useDashboardStore } from '../stores/dashboardStore';
 import SettingsPanel from './SettingsPanel';
 import ReleaseNotesModal from './ReleaseNotesModal';
@@ -86,7 +86,9 @@ export default function Layout({ children }) {
     { id: 'positions', label: '持仓', icon: Briefcase, show: modules.positions },
     { id: 'performance', label: '业绩', icon: TrendingUp, show: modules.performance },
     { id: 'details', label: '明细', icon: FileText, show: modules.details },
+    { id: 'changes', label: '变动', icon: RefreshCw, show: modules.changes },
     { id: 'tax', label: '税务', icon: Receipt, show: modules.tax !== false },
+    { id: 'chengji', label: '战绩', icon: Trophy, show: modules.chengji !== false },
     { id: 'portfolios', label: '组合', icon: PieChart, show: modules.portfolios !== false },
   ].filter((t) => t.show);
 

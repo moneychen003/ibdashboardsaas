@@ -11,6 +11,7 @@ const TABS = [
   { id: 'telegram', label: 'TG 机器人' },
   { id: 'share', label: '分享面板' },
   { id: 'flex', label: 'IB 自动同步' },
+  { id: 'flex-guide', label: '配置指南' },
   { id: 'market', label: '市场数据' },
   { id: 'guest', label: '游客权限' },
   { id: 'cleanup', label: '系统清理' },
@@ -414,6 +415,7 @@ export default function SettingsPanel() {
           {activeTab === 'telegram' && <TelegramTab />}
           {activeTab === 'share' && <ShareTab />}
           {activeTab === 'flex' && <FlexTab />}
+          {activeTab === 'flex-guide' && <FlexGuideTab />}
           {activeTab === 'guest' && <GuestTab isAdmin={isAdmin} />}
           {activeTab === 'cleanup' && <CleanupTab />}
           {activeTab === 'market' && <MarketTab />}
@@ -821,7 +823,6 @@ function FlexTab() {
   const [logs, setLogs] = useState({ list: [], total: 0 });
   const [form, setForm] = useState({ query_id: '', token: '', auto_sync: false, is_active: true });
   const [loading, setLoading] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -855,24 +856,12 @@ function FlexTab() {
     setLoading(true);
     try {
       await api.flexCredentialsSave(form);
-      setMessage('保存成功');
+      setMessage('保存成功，请点"立即同步"拉取报表');
       await fetchData();
     } catch (e) {
       setMessage(e.message || '保存失败');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const test = async () => {
-    setTesting(true);
-    try {
-      const res = await api.flexCredentialsTest({ query_id: form.query_id, token: form.token });
-      setMessage(res.message || '连接成功');
-    } catch (e) {
-      setMessage(e.message || '连接失败');
-    } finally {
-      setTesting(false);
     }
   };
 
@@ -923,7 +912,6 @@ function FlexTab() {
         </div>
         <div className="mt-3 flex gap-2">
           <button onClick={save} disabled={loading} className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{loading ? '保存中...' : '保存凭证'}</button>
-          <button onClick={test} disabled={testing || !form.query_id || !form.token} className="rounded-lg border border-[var(--light-gray)] px-3 py-2 text-sm font-medium hover:border-black disabled:opacity-50">{testing ? '测试中...' : '测试连接'}</button>
           <button onClick={syncNow} disabled={syncing} className="rounded-lg border border-[var(--light-gray)] px-3 py-2 text-sm font-medium hover:border-black disabled:opacity-50">{syncing ? '同步中...' : '立即同步'}</button>
         </div>
         {message && <div className="mt-2 text-xs text-[var(--gray)]">{message}</div>}
@@ -1422,6 +1410,224 @@ function UploadTab() {
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
         💡 建议一次性把历史 XML 都传完，数据越完整，收益率、持仓归因、交易排名等高级分析就越准确。上传完成后页面会自动刷新。
+      </div>
+    </div>
+  );
+}
+
+// ---------- Flex Query Configuration Guide Tab ----------
+function FlexGuideTab() {
+  const Section = ({ title, children }) => (
+    <section className="rounded-lg border border-[var(--light-gray)] bg-white">
+      <h3 className="border-b border-[var(--light-gray)] px-4 py-2.5 text-sm font-semibold">{title}</h3>
+      <div className="space-y-3 px-4 py-3 text-sm leading-relaxed">{children}</div>
+    </section>
+  );
+  const Pill = ({ tone = 'gray', children }) => {
+    const toneClass = {
+      green: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      red: 'bg-rose-100 text-rose-800 border-rose-200',
+      amber: 'bg-amber-100 text-amber-900 border-amber-200',
+      gray: 'bg-[var(--lighter-gray)] text-[var(--gray)] border-[var(--light-gray)]',
+      blue: 'bg-sky-100 text-sky-900 border-sky-200',
+    }[tone];
+    return <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${toneClass}`}>{children}</span>;
+  };
+
+  return (
+    <div className="space-y-4 text-[13px] text-[var(--text)]">
+      <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3">
+        <div className="text-sm font-semibold text-sky-900">📘 IB Flex Query 配置指南</div>
+        <p className="mt-1.5 text-xs text-sky-900/80">
+          Dashboard 的所有数据来自 IB（盈透）的 <strong>Flex Query</strong> 服务——你在 IB 后台配置一份"报表模板"，本面板按你给的 Token + Query ID 自动拉取并解析。本指南告诉你模板怎么配最稳，每个二选一选项怎么选。
+        </p>
+      </div>
+
+      <Section title="Step 1 · 在 IB 创建 Flex Query">
+        <ol className="list-decimal space-y-2 pl-5">
+          <li>登录 <strong>Account Management</strong>（盈透账户管理）→ 顶部菜单 <strong>Performance & Reports → Flex Queries</strong>。</li>
+          <li>新建 <strong>Activity Flex Query</strong>（不要选 Trade Confirm Flex）。</li>
+          <li>核心元数据：
+            <ul className="mt-1.5 list-disc space-y-1 pl-5 text-xs">
+              <li><strong>Format</strong>：<Pill tone="green">XML</Pill>（必须）</li>
+              <li><strong>Period</strong>：<Pill tone="green">Last 30 Days</Pill>（推荐）—— 即使脚本某天漏跑，下次同步也能补回最近 30 天数据；不要选 "Last Business Day" 或 "Today"，否则一断就丢历史</li>
+              <li><strong>Period in Sections</strong>：<Pill tone="green">Last 30 Days</Pill> 同上</li>
+              <li><strong>Profit and Loss</strong>：<Pill tone="green">Default</Pill></li>
+              <li><strong>Include Canceled Trades</strong>：✅ 勾上（取消单也要看）</li>
+              <li><strong>Include Currency Rates</strong>：✅ 勾上（汇率换算需要）</li>
+              <li><strong>Date Format</strong>：<code className="rounded bg-black/5 px-1">yyyyMMdd</code></li>
+              <li><strong>Time Format</strong>：<code className="rounded bg-black/5 px-1">HHmmss</code></li>
+            </ul>
+          </li>
+          <li>保存后 IB 会给你一个 <strong>Query ID</strong>（数字）。</li>
+          <li>另外去 <strong>Settings → Account Settings → Flex Web Service</strong> 里启用 token，复制 <strong>Token</strong>。</li>
+          <li>Token + Query ID 填到本面板的 <strong>「IB 自动同步」</strong> tab。</li>
+        </ol>
+      </Section>
+
+      <Section title="Step 2 · 哪些 Sections 要勾">
+        <p className="text-xs text-[var(--gray)]">下面是 Dashboard 强依赖的 sections，按重要性排序。其他没列的可以全勾，不影响。</p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-[var(--lighter-gray)] text-left text-[11px] uppercase">
+              <tr>
+                <th className="px-2 py-1.5 font-medium">Section</th>
+                <th className="px-2 py-1.5 font-medium">作用</th>
+                <th className="px-2 py-1.5 font-medium">必要性</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--light-gray)]">
+              {[
+                ['Account Information', '基础账户信息（开户日、币种）', 'must'],
+                ['Net Asset Value', '每日净值变化', 'must'],
+                ['Change in NAV', 'NAV 资金流分解（入金/利息/分红）', 'must'],
+                ['Open Positions', '当前持仓 + 成本', 'must'],
+                ['Trades', '成交逐笔', 'must'],
+                ['Cash Transactions', '入金出金/分红/利息事件', 'must'],
+                ['Statement of Funds', '资金流水底层', 'must'],
+                ['Unbundled Commission Details', '佣金明细（拆分 SEC/FINRA/broker）', 'must'],
+                ['Conversion Rates', '币种汇率', 'must'],
+                ['Change in Position Value', 'MTM 持仓价值变化', 'must'],
+                ['MTM Performance Summary in Base', '业绩归因基础', 'must'],
+                ['MTD/YTD Performance Summary', 'YTD 已实现盈亏', 'must'],
+                ['Option Exercises, Assignments, Expirations', 'wheel 期权事件归因', 'wheel'],
+                ['Open Dividend Accruals', '分红预提', 'wheel'],
+                ['Change in Dividend Accruals', '分红变动事件', 'wheel'],
+                ['Securities Lending (SLB)', '借券收入', 'wheel'],
+                ['Tier Interest Details', '现金分级利息', 'rec'],
+                ['Net Stock Position Summary', '股票净持仓', 'rec'],
+                ['Prior Period Positions', '历史持仓回填', 'rec'],
+                ['Order Summary', '订单级聚合（dashboard 已加 fallback，但建议勾）', 'rec'],
+                ['Corporate Actions', '拆分/合并/特殊分红', 'rec'],
+                ['Complex Positions', '多腿期权组合（spread/condor）', 'opt'],
+                ['Transaction Tax', 'SEC/TAF 税费（中国客户基本无）', 'opt'],
+              ].map(([sec, use, level]) => (
+                <tr key={sec}>
+                  <td className="px-2 py-1.5 font-medium">{sec}</td>
+                  <td className="px-2 py-1.5 text-[var(--gray)]">{use}</td>
+                  <td className="px-2 py-1.5">
+                    {level === 'must' && <Pill tone="red">必勾</Pill>}
+                    {level === 'wheel' && <Pill tone="green">wheel 必勾</Pill>}
+                    {level === 'rec' && <Pill tone="blue">推荐</Pill>}
+                    {level === 'opt' && <Pill tone="gray">可选</Pill>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-[var(--gray)]">💡 偷懒做法：直接 <strong>Select All</strong> 勾全所有 sections，再按下面 Step 3 把每个 section 内部的子选项调好。</p>
+      </Section>
+
+      <Section title="Step 3 · 二选一选项怎么选">
+        <p className="text-xs text-[var(--gray)]">展开每个 section 后，IB 会让你选粒度/口径。下面这些是会让人犹豫的二选一场景：</p>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-[var(--lighter-gray)] text-left text-[11px] uppercase">
+              <tr>
+                <th className="px-2 py-1.5 font-medium">Section · 子选项</th>
+                <th className="px-2 py-1.5 font-medium">推荐</th>
+                <th className="px-2 py-1.5 font-medium">原因</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--light-gray)]">
+              <tr>
+                <td className="px-2 py-1.5">Change in NAV<br /><span className="text-[10px] text-[var(--gray)]">P&L 归因模式</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">Mark-to-Market</Pill> · <Pill tone="red">别选 Realized & Unrealized</Pill></td>
+                <td className="px-2 py-1.5">这两个是互斥单选。Dashboard 的"近 7 日盈亏"、Hero 区间收益等强依赖 <code>mtm</code> 字段；YTD 已实现盈亏走的是独立的 <strong>MTD/YTD Performance Summary</strong> section，不靠这里的 <code>realized</code></td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">Open Positions<br /><span className="text-[10px] text-[var(--gray)]">行级粒度</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">Summary 勾</Pill> · <Pill tone="red">LOT 别勾</Pill></td>
+                <td className="px-2 py-1.5">LOT 是 Summary 的 tax lot 拆分，混进来会让持仓 quantity / 总市值翻倍或错位（已知历史 bug，2026-04-26 修过）</td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">Trades<br /><span className="text-[10px] text-[var(--gray)]">主行类型</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">Executions 勾</Pill> · <Pill tone="green">Order 勾</Pill></td>
+                <td className="px-2 py-1.5">Executions 是逐笔成交（dashboard 主力数据源，必勾）；Order 是订单级聚合（用于订单级分析，可同时勾）</td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">Trades · Summary Mode<br /><span className="text-[10px] text-[var(--gray)]">Summarize by Symbol vs Order Summary</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">Order Summary</Pill></td>
+                <td className="px-2 py-1.5">这两个互斥。Order Summary 跟 wheel 操作粒度一致（一次下单 = 一行）；Summarize by Symbol 把同日 buy/sell 混合无法区分开仓平仓</td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">Cash Transactions<br /><span className="text-[10px] text-[var(--gray)]">行级粒度</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">Detail 勾</Pill> · <Pill tone="red">Summary 别勾</Pill></td>
+                <td className="px-2 py-1.5">Detail 是逐笔（dashboard 用这个）；Summary 是同日按币种重复输出，混进来会让 netDeposits / 入金统计翻倍</td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">Change in Dividend Accruals<br /><span className="text-[10px] text-[var(--gray)]">行级粒度</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">Detail 勾</Pill></td>
+                <td className="px-2 py-1.5">Summary 是同日重复汇总，跟 Cash Transactions 一样会翻倍</td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">Corporate Actions<br /><span className="text-[10px] text-[var(--gray)]">行级粒度</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">Detail 勾</Pill></td>
+                <td className="px-2 py-1.5">Summary 是冗余汇总，dashboard 走 Detail</td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">SLB Open Contract<br /><span className="text-[10px] text-[var(--gray)]">行级粒度</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">Detail 勾</Pill></td>
+                <td className="px-2 py-1.5">Summary 行 slb_transaction_id 是占位 "-"，dashboard 按 Detail 解析</td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">Statement of Funds<br /><span className="text-[10px] text-[var(--gray)]">币种口径</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">两个都勾</Pill><br /><span className="text-[10px]">BaseCurrency + Currency</span></td>
+                <td className="px-2 py-1.5">不互斥。Dashboard 汇总用 BaseCurrency 已折算的；明细列表用 Currency 保留原币种</td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">Transaction Fees<br /><span className="text-[10px] text-[var(--gray)]">Execution vs Order</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">Order</Pill> · <Pill tone="gray">无所谓</Pill></td>
+                <td className="px-2 py-1.5">Dashboard 实际不读这张表（佣金走 Unbundled Commission Details），选哪个都不影响。建议跟 Trades section 保持 Order 一致</td>
+              </tr>
+              <tr>
+                <td className="px-2 py-1.5">Cash Report<br /><span className="text-[10px] text-[var(--gray)]">币种范围</span></td>
+                <td className="px-2 py-1.5"><Pill tone="green">所有币种都勾</Pill></td>
+                <td className="px-2 py-1.5">不要只选 USD；多币种账户必须全勾</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Section>
+
+      <Section title="Step 4 · 一次性导入历史数据（可选但推荐）">
+        <p>Daily flex_sync 只拉最近 30 天，要把<strong>开户至今</strong>的完整历史灌进 dashboard，建议额外手动跑一次：</p>
+        <ol className="list-decimal space-y-1.5 pl-5">
+          <li>克隆一份 Flex Query，命名 "<em>FullHistory</em>"</li>
+          <li>把 Period 改成 <Pill tone="green">Year-To-Date</Pill> 或 <Pill tone="green">Custom Date Range</Pill>（按年拆）</li>
+          <li>每年单独跑一次 query → 下载 XML</li>
+          <li>来本面板的<strong>「导入数据」</strong> tab 上传，按年合并到数据库（已去重）</li>
+        </ol>
+        <p className="text-xs text-[var(--gray)]">⚠️ IB 单次 Flex Query 时间跨度有上限（通常 1 年），所以多年要拆开拉。</p>
+      </Section>
+
+      <Section title="常见问题">
+        <details className="rounded-md border border-[var(--light-gray)] bg-[var(--lighter-gray)] px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium">📭 上传成功但 dashboard 没数据</summary>
+          <p className="mt-1.5 text-xs">先看「数据质量」卡片（明细 tab 底部）—— 哪张表 0 行说明对应 section 没勾或子选项错。再来本指南对照 Step 2/3。</p>
+        </details>
+        <details className="rounded-md border border-[var(--light-gray)] bg-[var(--lighter-gray)] px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium">⏱️ 数据停在前几天 / 不更新</summary>
+          <p className="mt-1.5 text-xs">说明 daily flex_sync 脚本断了。在「IB 自动同步」tab 点"立即同步"手动跑一次。如果 Period 当时设了 "Last Business Day"，会丢历史 → 改成 Last 30 Days 一劳永逸。</p>
+        </details>
+        <details className="rounded-md border border-[var(--light-gray)] bg-[var(--lighter-gray)] px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium">🎯 Complex Positions / Transaction Tax 表 0 行</summary>
+          <p className="mt-1.5 text-xs">Complex Positions 只在你做<strong>多腿期权组合</strong>（spread/condor/iron）时才有数据；wheel 单腿策略不会触发。Transaction Tax 只在 IB 给你扣过 SEC fee/TAF/withholding 时才有，中国客户基本永远是 0。两者 0 行都是"业务正常"，不是配置错。</p>
+        </details>
+        <details className="rounded-md border border-[var(--light-gray)] bg-[var(--lighter-gray)] px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium">🔢 持仓数字跟 IB 客户端对不上</summary>
+          <p className="mt-1.5 text-xs">主要原因是 Open Positions 误勾了 LOT 子选项 → 多 tax lot 的 stock 持仓被覆盖。回 Step 3 把 LOT 取消，重新触发一次 sync。</p>
+        </details>
+        <details className="rounded-md border border-[var(--light-gray)] bg-[var(--lighter-gray)] px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium">📅 修改 Flex Query 配置后多久生效</summary>
+          <p className="mt-1.5 text-xs">下一次 daily flex_sync（北京时间次日凌晨）按新配置拉。等不及就在「IB 自动同步」tab 点"立即同步"。</p>
+        </details>
+      </Section>
+
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-900">
+        ✅ 配置好后，验证一遍："明细" tab 底部的"数据质量"卡片应该全绿（除 Complex Positions / Transaction Tax 这两个业务正常 0 行的）。
       </div>
     </div>
   );

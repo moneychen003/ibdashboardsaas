@@ -304,6 +304,7 @@ export default function AdminPage() {
                   <tr className="border-b border-[var(--light-gray)] text-left text-[var(--gray)]">
                     <th className="py-2">邮箱</th>
                     <th className="py-2">用户名</th>
+                    <th className="py-2">注册时间</th>
                     <th className="py-2">等级</th>
                     <th className="py-2">上传数</th>
                     <th className="py-2">最近上传</th>
@@ -317,6 +318,7 @@ export default function AdminPage() {
                     <tr key={u.id} className="border-b border-[var(--lighter-gray)]">
                       <td className="py-2">{u.email}</td>
                       <td className="py-2">{u.username || '-'}</td>
+                      <td className="py-2 text-xs text-[var(--gray)]">{fmtDate(u.created_at)}</td>
                       <td className="py-2">{u.tier || 'free'}</td>
                       <td className="py-2">{u.upload_count || 0}</td>
                       <td className="py-2">{fmtDate(u.last_upload_at)}</td>
@@ -335,7 +337,7 @@ export default function AdminPage() {
                       </td>
                     </tr>
                   ))}
-                  {!users.list.length && <tr><td colSpan={8} className="py-6 text-center text-[var(--gray)]">暂无用户</td></tr>}
+                  {!users.list.length && <tr><td colSpan={9} className="py-6 text-center text-[var(--gray)]">暂无用户</td></tr>}
                 </tbody>
               </table>
             </div>

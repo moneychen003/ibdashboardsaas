@@ -173,6 +173,15 @@ def get_order_execution_quality(conn, account_id=None):
         SELECT COUNT(*) FROM archive_order WHERE {where}
     ''', params)
     total_orders = cursor.fetchone()[0]
+    # Fallback: 客户 Flex Query 没勾 Trades→Order Summary 时 archive_order 空，
+    # 从 archive_trade GROUP BY ib_order_id 现场重建 order 计数
+    if not total_orders:
+        cursor.execute(f'''
+            SELECT COUNT(DISTINCT ib_order_id) FROM archive_trade
+            WHERE {where} AND ib_order_id IS NOT NULL AND ib_order_id != ''
+        ''', params)
+        _r = cursor.fetchone()
+        total_orders = int(_r[0]) if _r and _r[0] else 0
 
     # Try to get filled vs cancelled if status field exists (it may not)
     # We'll approximate using trade count vs order count
@@ -1101,50 +1110,146 @@ def _parse_occ_symbol(symbol):
     return underlying, expiry, pc, int(strike8) / 1000.0
 
 
+# 数据驱动的策略识别规则。新加策略只追加 entry 不动主逻辑。
+# predicate(ctx) -> bool，ctx 字段：putCall/qty/underlyingShares/multiplier
+STRATEGY_RULES = [
+    {
+        'name': 'COVERED_CALL',
+        'label': '备兑看涨 (Covered Call)',
+        'predicate': lambda c: (
+            c.get('putCall') == 'C'
+            and c.get('qty', 0) < 0
+            and c.get('underlyingShares', 0) >= abs(c.get('qty', 0)) * (c.get('multiplier') or 100)
+        ),
+    },
+    {
+        'name': 'NAKED_CALL',
+        'label': '裸卖看涨 (Naked Call)',
+        'predicate': lambda c: (
+            c.get('putCall') == 'C'
+            and c.get('qty', 0) < 0
+            and c.get('underlyingShares', 0) < abs(c.get('qty', 0)) * (c.get('multiplier') or 100)
+        ),
+    },
+    {
+        'name': 'CASH_SECURED_PUT',
+        'label': '现金担保看跌 (CSP)',
+        'predicate': lambda c: c.get('putCall') == 'P' and c.get('qty', 0) < 0,
+    },
+    {
+        'name': 'LONG_CALL',
+        'label': '买入看涨 (Long Call)',
+        'predicate': lambda c: c.get('putCall') == 'C' and c.get('qty', 0) > 0,
+    },
+    {
+        'name': 'LONG_PUT',
+        'label': '买入看跌 (Long Put)',
+        'predicate': lambda c: c.get('putCall') == 'P' and c.get('qty', 0) > 0,
+    },
+]
+
+
+def _detect_strategy(ctx):
+    """Return (strategy_name, label) or ('OTHER', '未识别')."""
+    for rule in STRATEGY_RULES:
+        try:
+            if rule['predicate'](ctx):
+                return rule['name'], rule['label']
+        except Exception:
+            continue
+    return 'OTHER', '未识别'
+
+
+def _diagnose_unrecognized(ctx):
+    """Why this option wasn't matched. Returns list of hint strings (Chinese)."""
+    hints = []
+    if not ctx.get('occParsed'):
+        hints.append('OCC symbol 不是标准格式（正则 ^[A-Z]+\\s+\\d{6}[PC]\\d{8}$ 未匹配）')
+    if not ctx.get('putCall'):
+        hints.append('缺 putCall 字段（put_call 列空且 OCC 解析失败）')
+    if not ctx.get('strike'):
+        hints.append('缺 strike')
+    if not ctx.get('expiry'):
+        hints.append('缺 expiry')
+    if not ctx.get('underlying'):
+        hints.append('缺 underlying 标的')
+    if (ctx.get('qty') or 0) == 0:
+        hints.append('quantity = 0（孤立行，可能是 IB 数据噪音）')
+    if not hints:
+        # 字段齐但当前 STRATEGY_RULES 都没匹配——多半是新策略类型（spread / butterfly / 多腿组合）
+        hints.append(
+            f"字段齐全但 STRATEGY_RULES 无匹配（qty={ctx.get('qty')} pc={ctx.get('putCall')} "
+            f"side={'long' if (ctx.get('qty') or 0) > 0 else 'short'} "
+            f"underlyingShares={ctx.get('underlyingShares', 0)}）— 可能是多腿组合，需扩规则"
+        )
+    return hints
+
+
 def get_options_strategy_lens(conn, account_id=None):
     cursor = conn.cursor()
     where = _acc_clause(account_id, 'stmt_account_id')
     params = _acc_params(account_id)
 
-    # Current option positions — detect via multiple signals because IB Flex output
-    # may leave asset_category/put_call NULL on owner-style sparse rows. Fall back to
-    # OCC symbol pattern (LENGTH>15 with internal spaces) and description trailing 'P'/'C'.
+    # Step 1: build underlying -> shares map (STK + ETF) for covered/naked decision
     cursor.execute(f'''
-        SELECT symbol, description, put_call, CAST(strike AS REAL), expiry, CAST(position AS REAL),
-               CAST(position_value AS REAL), CAST(mark_price AS REAL), underlying_symbol, multiplier
+        SELECT symbol, SUM(CAST(position AS REAL)) AS shares
         FROM archive_open_position
         WHERE {where}
           AND stmt_date = (SELECT MAX(stmt_date) FROM archive_open_position WHERE {where})
           AND (level_of_detail = 'SUMMARY' OR level_of_detail IS NULL OR level_of_detail = '')
+          AND UPPER(COALESCE(asset_category,'')) IN ('STK', 'STOCK', 'ETF')
+        GROUP BY symbol
+    ''', params + params)
+    underlying_shares = {row[0]: safe_float(row[1]) or 0 for row in cursor.fetchall()}
+
+    # Step 2: pull all option positions (multi-signal detection because IB Flex sparse rows)
+    # 期权识别条件：optimistic 多信号匹配，但显式排除已知非期权 asset_category。
+    # 排除 STK/ETF 等股票类避免把 'ALPHABET INC-CL C' 这类 description 以 ' C' 结尾的股票
+    # 错认成 Call 期权（2026-04-27 通过 unrecognized 字段发现 4 个 user 的 GOOG 被误判）
+    cursor.execute(f'''
+        SELECT symbol, description, put_call, CAST(strike AS REAL), expiry, CAST(position AS REAL),
+               CAST(position_value AS REAL), CAST(mark_price AS REAL), underlying_symbol, multiplier,
+               asset_category
+        FROM archive_open_position
+        WHERE {where}
+          AND stmt_date = (SELECT MAX(stmt_date) FROM archive_open_position WHERE {where})
+          AND (level_of_detail = 'SUMMARY' OR level_of_detail IS NULL OR level_of_detail = '')
+          AND UPPER(COALESCE(asset_category,'')) NOT IN ('STK', 'STOCK', 'ETF', 'BOND', 'CASH', 'CFD', 'WAR', 'FUND', 'MUT', 'IND')
           AND (
-            UPPER(COALESCE(asset_category,'')) IN ('OPT', 'OPTION')
+            UPPER(COALESCE(asset_category,'')) IN ('OPT', 'OPTION', 'FOP')
             OR UPPER(COALESCE(put_call,'')) IN ('P', 'C')
             OR (LENGTH(symbol) > 15 AND symbol LIKE '%  %')
-            OR description LIKE '% P'
-            OR description LIKE '% C'
           )
     ''', params + params)
 
     strategies = []
+    unrecognized = []
     expiry_calendar = defaultdict(list)
-    for sym, desc, pc, strike, exp, qty, pv, mp, under, mult in cursor.fetchall():
+    for sym, desc, pc, strike, exp, qty, pv, mp, under, mult, asset_cat in cursor.fetchall():
         # Fallback: parse missing fields from OCC symbol
-        if not pc or not strike or not exp or not under:
-            occ_under, occ_exp, occ_pc, occ_strike = _parse_occ_symbol(sym)
-            pc = pc or occ_pc
-            strike = strike or occ_strike
-            exp = exp or occ_exp
-            under = under or occ_under
-        strategy = 'OTHER'
+        occ_under, occ_exp, occ_pc, occ_strike = _parse_occ_symbol(sym)
+        occ_parsed = bool(occ_under and occ_exp and occ_pc and occ_strike)
+        pc = pc or occ_pc
+        strike = strike or occ_strike
+        exp = exp or occ_exp
+        under = under or occ_under
+
         qty_num = safe_float(qty) or 0
-        if 'COVERED' in (desc or '').upper() or qty_num > 0 and pc == 'C':
-            strategy = 'COVERED_CALL'
-        elif qty_num < 0 and pc == 'P':
-            strategy = 'CASH_SECURED_PUT'
-        elif qty_num < 0 and pc == 'C':
-            strategy = 'NAKED_CALL'
-        elif qty_num > 0 and pc == 'P':
-            strategy = 'LONG_PUT'
+        mult_num = safe_float(mult) or 100
+        ctx = {
+            'symbol': sym,
+            'putCall': pc,
+            'qty': qty_num,
+            'underlying': under,
+            'strike': safe_float(strike),
+            'expiry': exp,
+            'multiplier': mult_num,
+            'underlyingShares': underlying_shares.get(under, 0),
+            'occParsed': occ_parsed,
+            'description': desc,
+            'assetCategory': asset_cat,
+        }
+        strategy_name, strategy_label = _detect_strategy(ctx)
 
         days = None
         try:
@@ -1156,24 +1261,46 @@ def get_options_strategy_lens(conn, account_id=None):
             pass
 
         # Approx annualized yield: position_value / abs(notional) * 365/days
-        notional = abs(safe_float(strike) * safe_float(qty) * safe_float(mult)) if strike and qty and mult else 0
+        notional = abs(safe_float(strike) * qty_num * mult_num) if strike else 0
         ann_yield = None
         if pv and notional and days and days > 0:
             ann_yield = (abs(safe_float(pv)) / notional) * (365 / days) * 100
 
-        strategies.append({
+        item = {
             'symbol': sym,
             'underlying': under,
-            'strategy': strategy,
+            'strategy': strategy_name,
+            'strategyLabel': strategy_label,
             'putCall': pc,
             'strike': safe_float(strike),
             'expiry': exp,
             'daysToExpiry': days,
-            'quantity': safe_float(qty),
+            'quantity': qty_num,
             'positionValue': safe_float(pv),
             'markPrice': safe_float(mp),
-            'annualizedYield': round(ann_yield, 2) if ann_yield is not None else None
-        })
+            'annualizedYield': round(ann_yield, 2) if ann_yield is not None else None,
+            'underlyingShares': underlying_shares.get(under, 0),
+        }
+        strategies.append(item)
+
+        if strategy_name == 'OTHER':
+            unrecognized.append({
+                'symbol': sym,
+                'underlying': under,
+                'occParsed': occ_parsed,
+                'putCall': pc,
+                'strike': safe_float(strike),
+                'expiry': exp,
+                'daysToExpiry': days,
+                'quantity': qty_num,
+                'side': 'long' if qty_num > 0 else ('short' if qty_num < 0 else 'flat'),
+                'underlyingShares': underlying_shares.get(under, 0),
+                'positionValue': safe_float(pv),
+                'markPrice': safe_float(mp),
+                'description': desc,
+                'assetCategory': asset_cat,
+                'reasons': _diagnose_unrecognized(ctx),
+            })
 
     # Upcoming EAE events
     cursor.execute(f'''
@@ -1186,5 +1313,7 @@ def get_options_strategy_lens(conn, account_id=None):
     return {
         'currentStrategies': strategies,
         'expiryCalendar': [{'date': d, 'count': len(syms), 'symbols': syms} for d, syms in sorted(expiry_calendar.items())],
-        'upcomingEAE': upcoming_eae
+        'upcomingEAE': upcoming_eae,
+        'unrecognized': unrecognized,
+        'strategyRules': [{'name': r['name'], 'label': r['label']} for r in STRATEGY_RULES],
     }

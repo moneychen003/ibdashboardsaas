@@ -1544,6 +1544,19 @@ def get_latest_positions(conn, account_id=None):
             'capitalCostBasisPrice': cb.get('capitalCostBasisPrice'),
             'capitalCostBasisMoney': cb.get('capitalCostBasisMoney')
         }
+        # Compute base-currency fifoPnlUnrealized using the effective FX rate
+        pv_local_for_rate = safe_float(row[3]) if row[3] is not None else 0
+        pv_base_for_rate = item.get('positionValueInBase')
+        fx_to_base = item.get('fxRateToBase')
+        if pv_base_for_rate is not None and pv_base_for_rate != 0 and pv_local_for_rate != 0:
+            effective_rate = pv_base_for_rate / pv_local_for_rate
+        elif fx_to_base is not None:
+            effective_rate = fx_to_base
+        else:
+            effective_rate = 1.0
+        fpu_raw = item.get('fifoPnlUnrealized')
+        if fpu_raw is not None:
+            item['fifoPnlUnrealizedInBase'] = round(fpu_raw * effective_rate, 2)
         live_price = live_price_map.get(symbol)
         if live_price and row[2] in ('STOCK', 'ETF'):
             old_pv = safe_float(row[3]) if row[3] is not None else 0
@@ -1573,10 +1586,12 @@ def get_latest_positions(conn, account_id=None):
                 item['premiumPerContract'] = round(premium_per_contract, 2)
                 item['netPremium'] = round(net_premium, 2)
                 item['estimatedPnl'] = round(net_premium + current_pv, 2)
+                item['estimatedPnlInBase'] = round(item['estimatedPnl'] * effective_rate, 2)
             else:
                 # fallback 到旧逻辑
                 net_premium = option_pnl_map.get(symbol, 0)
                 item['estimatedPnl'] = round(net_premium + current_pv, 2)
+                item['estimatedPnlInBase'] = round(item['estimatedPnl'] * effective_rate, 2)
                 item['netPremium'] = round(net_premium, 2)
                 item['premiumPerContract'] = round(net_premium / contracts, 2) if contracts else 0
                 item['premiumPerShare'] = round(net_premium / contracts / 100, 4) if contracts else 0

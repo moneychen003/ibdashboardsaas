@@ -29,8 +29,35 @@ function HeroMiniChart({ data, range, isPerformance, gainPct }) {
   const labels = series.map((s) => s.date.toISOString().slice(0, 10));
   const baseValue = series[0].value || 1;
   const values = isPerformance
-    ? series.map((s, i) => {
-        // 如果后端提供了精确的区间收益百分比，用最后一个点的值对齐它，避免与 Hero 大数字不一致
+    ? (() => {
+        // Subtract cumulative inflow within range so the curve and the hero
+        // gainPct number share the same "ex-flow" basis (no late-segment cliff).
+        // Falls back to legacy NAV-cumulative algorithm if dailyFlow is missing
+        // or any computation yields a non-finite number.
+        try {
+          const flows = data && data.dailyFlow;
+          if (!Array.isArray(flows) || !flows.length) return null;
+          const flowMap = Object.create(null);
+          for (const f of flows) {
+            if (!f || !f.date) continue;
+            const k = String(f.date).slice(0, 10);
+            flowMap[k] = (flowMap[k] || 0) + (Number(f.flow) || 0);
+          }
+          let cum = 0;
+          const adjusted = series.map((s) => {
+            const k = s.date.toISOString().slice(0, 10);
+            cum += flowMap[k] || 0;
+            return s.value - cum;
+          });
+          const base = adjusted[0];
+          if (!Number.isFinite(base) || Math.abs(base) < 1) return null;
+          const out = adjusted.map((v) => ((v - base) / base) * 100);
+          if (out.some((v) => !Number.isFinite(v))) return null;
+          return out;
+        } catch (_) {
+          return null;
+        }
+      })() || series.map((s, i) => {
         if (i === series.length - 1 && gainPct != null) return gainPct;
         return ((s.value / baseValue) - 1) * 100;
       })

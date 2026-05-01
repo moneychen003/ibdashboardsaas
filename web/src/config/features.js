@@ -6,7 +6,7 @@
  */
 export const FEATURES = {
   /** 是否启用推广组件：微信群聊弹窗、加入群聊按钮等 */
-  enablePromotion: true,
+  enablePromotion: false,
 
   /** 弹窗配置 */
   promotion: {

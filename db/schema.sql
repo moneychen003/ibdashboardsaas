@@ -723,13 +723,62 @@ CREATE INDEX idx_share_links_token ON share_links(token);
 CREATE INDEX idx_share_links_user ON share_links(user_id, created_at DESC);
 
 -- ------------------------------------------------------------------
+-- User Portfolios (自定义组合 / AI 分组)
+-- ------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_portfolios (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    color TEXT DEFAULT '#6366f1',
+    sort_order INT DEFAULT 0,
+    target_pct NUMERIC,
+    is_cash BOOLEAN DEFAULT FALSE,
+    notes TEXT,
+    auto_rule TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS user_portfolio_holdings (
+    portfolio_id UUID NOT NULL REFERENCES user_portfolios(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    asset_class TEXT,
+    target_pct_within NUMERIC,
+    source TEXT DEFAULT 'manual',
+    added_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, symbol)
+);
+
+CREATE TABLE IF NOT EXISTS user_portfolio_excludes (
+    portfolio_id UUID NOT NULL REFERENCES user_portfolios(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    excluded_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (portfolio_id, user_id, symbol)
+);
+
+CREATE TABLE IF NOT EXISTS user_holding_strategy_overrides (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    strategy_override TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, symbol)
+);
+
+CREATE INDEX IF NOT EXISTS idx_up_user ON user_portfolios(user_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_uph_portfolio ON user_portfolio_holdings(portfolio_id);
+
+-- ------------------------------------------------------------------
 -- User Notifications (Telegram)
 -- ------------------------------------------------------------------
 ALTER TABLE user_profiles
     ADD COLUMN IF NOT EXISTS telegram_bot_token TEXT,
     ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT,
     ADD COLUMN IF NOT EXISTS report_schedule TEXT DEFAULT 'none',
-    ADD COLUMN IF NOT EXISTS option_alert_days JSONB DEFAULT '[7,3,1]';
+    ADD COLUMN IF NOT EXISTS option_alert_days JSONB DEFAULT '[7,3,1]',
+    ADD COLUMN IF NOT EXISTS custom_ai_prompt TEXT;
 
 CREATE TABLE IF NOT EXISTS user_notification_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

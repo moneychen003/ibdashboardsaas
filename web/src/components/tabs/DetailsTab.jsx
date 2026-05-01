@@ -3,6 +3,7 @@ import { useDashboardStore } from '../../stores/dashboardStore';
 import { fmtCur, fmtDate, fmtNum } from '../../utils/format';
 import OrderExecutionPanel from '../OrderExecutionPanel';
 import WashSaleAlerts from '../WashSaleAlerts';
+import ChangesTab from './ChangesTab';
 
 function tradeKindTag(t) {
   const codes = (t.notes || '').split(';').map((c) => c.trim());
@@ -747,6 +748,10 @@ export default function DetailsTab() {
       <Card title="🛠️ 数据质量">
         <DataQualityCard dq={data.dataQuality} />
       </Card>
+
+      <div className="border-t border-[var(--light-gray)] pt-6">
+        <ChangesTab />
+      </div>
     </div>
   );
 }

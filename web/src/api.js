@@ -28,12 +28,26 @@ async function fetchJson(path, options = {}) {
       const err = await resp.text();
       if (resp.status === 401) {
         localStorage.removeItem('token');
-        // 只有真正带了 token 还被拒时才跳登录页；游客无 token 时不强制跳转
-        if (token) {
+        const friendly = token
+          ? '登录已过期，请重新登录'
+          : '需要先注册账号或登录后才能使用此功能';
+        if (typeof window !== 'undefined') {
+          try { alert(friendly + '\n\n点击确定前往注册/登录页'); } catch {}
           window.location.href = '/login';
         }
+        const e = new Error(friendly);
+        e.status = 401;
+        throw e;
       }
-      throw new Error(`HTTP ${resp.status}: ${err}`);
+      // 4xx/5xx：尝试从 JSON body 取后端的 friendly error 字段，没有再 fall back 到原始文本
+      let friendlyMsg = '';
+      try {
+        const j = JSON.parse(err);
+        friendlyMsg = j.error || j.message || '';
+      } catch {}
+      const e = new Error(friendlyMsg || `HTTP ${resp.status}: ${err}`);
+      e.status = resp.status;
+      throw e;
     }
     return resp.json();
   } catch (e) {
@@ -62,6 +76,27 @@ export const api = {
   dashboardChanges: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/changes${params}`),
   dashboardTax: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/tax${params}`),
   dashboardChengji: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/chengji${params}`),
+  dashboardPortfolios: (alias, params = '') => fetchJson(`/api/dashboard/${alias}/portfolios${params}`),
+  portfoliosList: () => fetchJson('/api/portfolios'),
+  portfolioCreate: (data) => fetchJson('/api/portfolios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  portfolioUpdate: (id, data) => fetchJson(`/api/portfolios/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  portfolioDelete: (id) => fetchJson(`/api/portfolios/${id}`, { method: 'DELETE' }),
+  portfolioAddHoldings: (id, symbols) => fetchJson(`/api/portfolios/${id}/holdings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbols }) }),
+  portfolioRemoveHolding: (id, sym) => fetchJson(`/api/portfolios/${id}/holdings/${encodeURIComponent(sym)}`, { method: 'DELETE' }),
+  portfoliosReorder: (ids) => fetchJson('/api/portfolios/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) }),
+  portfoliosAutoSetup: () => fetchJson('/api/portfolios/auto-setup', { method: 'POST' }),
+  portfoliosMatchSuggest: (locale) => fetchJson('/api/portfolios/match-suggest' + (locale ? ('?locale=' + locale) : ''), { method: 'POST', timeout: 90000 }),
+  portfoliosMatchApply: (plan) => fetchJson('/api/portfolios/match-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan }), timeout: 60000 }),
+  portfoliosClearAutoRules: () => fetchJson('/api/portfolios/clear-auto-rules', { method: 'POST' }),
+  portfoliosResetAll: () => fetchJson('/api/portfolios/reset-all', { method: 'POST' }),
+  portfolioHoldingTrades: (symbol) => fetchJson(`/api/portfolios/holding-trades/${encodeURIComponent(symbol)}`),
+  portfoliosAiSuggest: (locale) => fetchJson('/api/portfolios/ai-suggest' + (locale ? ('?locale=' + locale) : ''), { method: 'POST', timeout: 90000 }),
+  portfoliosAiApply: (plan) => fetchJson('/api/portfolios/ai-apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan }), timeout: 60000 }),
+  portfoliosAiPromptGet: () => fetchJson('/api/portfolios/ai-prompt'),
+  portfoliosAiPromptSave: (prompt) => fetchJson('/api/portfolios/ai-prompt', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) }),
+  portfolioOptionPnlTimeline: () => fetchJson('/api/portfolios/option-pnl-timeline'),
+  portfolioSetStrategyOverride: (symbol, override) => fetchJson(`/api/portfolios/holdings/${encodeURIComponent(symbol)}/strategy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ override }) }),
+  portfolioWheelCycles: () => fetchJson('/api/portfolios/wheel-cycles'),
   releaseNotes: () => fetchJson('/api/release-notes'),
   telegramStatus: () => fetchJson('/api/telegram/status'),
   telegramGenerateCode: () => fetchJson('/api/telegram/generate-code', { method: 'POST' }),
@@ -92,14 +127,26 @@ export const api = {
       } else {
         if (xhr.status === 401) {
           localStorage.removeItem('token');
-          if (t) window.location.href = '/login';
+          const friendly = t
+            ? '登录已过期，请重新登录后再上传'
+            : '上传 XML 需要先注册账号并登录，请前往注册/登录页';
+          try { alert(friendly + '\n\n点击确定前往注册/登录页'); } catch {}
+          window.location.href = '/login';
+          reject(new Error(friendly));
+          return;
         }
-        reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+        // 后端的 4xx/5xx 通常带 JSON {error: friendlyMsg}
+        let friendlyMsg = '';
+        try {
+          const j = JSON.parse(xhr.responseText);
+          friendlyMsg = j.error || j.message || '';
+        } catch {}
+        reject(new Error(friendlyMsg || `HTTP ${xhr.status}: ${xhr.responseText}`));
       }
     };
-    xhr.onerror = () => reject(new Error('Network error'));
-    xhr.ontimeout = () => reject(new Error('Request timeout'));
-    xhr.onabort = () => reject(new Error('Upload aborted'));
+    xhr.onerror = () => reject(new Error('网络中断或连接被重置，请检查网络后重试'));
+    xhr.ontimeout = () => reject(new Error('上传超时（10 分钟）：文件可能过大或网络太慢，建议拆分 Flex Query 时间段'));
+    xhr.onabort = () => reject(new Error('上传被取消'));
     xhr.send(formData);
   }),
   jobStatus: (jobId) => fetchJson(`/api/jobs/${jobId}`),
@@ -107,7 +154,6 @@ export const api = {
   // FlexQuery
   flexCredentialsGet: () => fetchJson('/api/flex-credentials'),
   flexCredentialsSave: (data) => fetchJson('/api/flex-credentials', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
-  flexCredentialsTest: (data) => fetchJson('/api/flex-credentials/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   flexCredentialsSync: () => fetchJson('/api/flex-credentials/sync', { method: 'POST' }),
   flexCredentialsLogs: (params = '') => fetchJson(`/api/flex-credentials/sync-logs${params}`),
   flexCredentialsDeleteLog: (logId) => fetchJson(`/api/flex-credentials/sync-logs/${logId}`, { method: 'DELETE' }),

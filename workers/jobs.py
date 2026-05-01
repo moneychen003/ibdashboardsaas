@@ -529,3 +529,160 @@ def send_report_job(user_id: str, report_type: str = "weekly"):
         return {"status": "sent"}
     except Exception as e:
         return {"status": "failed", "error": str(e)}
+
+
+
+# ============================================================
+# Trades push (every 15 min) - 2026-04-27
+# ============================================================
+def send_trades_job():
+    """Push unseen trades via user_telegram_bindings (platform bot @ibdashboard_bot).
+    Bot token comes from env TELEGRAM_BOT_TOKEN (set by wrapper from ib_saas_tg_bot service)."""
+    import os
+    from db.postgres_client import execute
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        print("send_trades_job: TELEGRAM_BOT_TOKEN env not set, abort")
+        return
+    rows = execute(
+        """
+        SELECT b.user_id, b.chat_id
+        FROM user_telegram_bindings b JOIN users u ON u.id = b.user_id
+        WHERE u.is_active = TRUE
+        """
+    )
+    for r in rows:
+        try:
+            _push_trades_for_user(str(r["user_id"]), bot_token, str(r["chat_id"]))
+        except Exception as e:
+            print(f"send_trades for {r['user_id']}: {e}")
+
+
+def _push_trades_for_user(user_id, bot_token, chat_id):
+    """Push unseen trades since 2 days ago to user's TG. Dedupe via user_notification_logs."""
+    import datetime, json, urllib.request, urllib.parse
+    from collections import defaultdict
+    from db.postgres_client import execute, execute_one
+
+    cutoff_date = (datetime.datetime.now() - datetime.timedelta(days=2)).strftime("%Y%m%d")
+    rows = execute(
+        """
+        SELECT trade_date, buy_sell, symbol, underlying_symbol, quantity, trade_price,
+               proceeds, asset_category, fifo_pnl_realized,
+               trade_id, transaction_id, account_id, currency
+        FROM archive_trade
+        WHERE user_id = %s AND trade_date >= %s AND trade_date IS NOT NULL AND symbol IS NOT NULL
+        ORDER BY trade_date, date_time
+        """,
+        (user_id, cutoff_date),
+    )
+
+    pushed_rows = execute(
+        """
+        SELECT payload FROM user_notification_logs
+        WHERE user_id = %s AND type = 'trade_pushed' AND sent_at > NOW() - INTERVAL '14 days'
+        """,
+        (user_id,),
+    )
+    pushed_ids = set()
+    for p in pushed_rows:
+        pl = p.get("payload") or {}
+        if isinstance(pl, dict) and pl.get("trade_id"):
+            pushed_ids.add(pl["trade_id"])
+
+    new_trades = []
+    for r in rows:
+        tid = r.get("trade_id") or r.get("transaction_id") or f"{r['trade_date']}-{r['symbol']}-{r['quantity']}"
+        if tid in pushed_ids:
+            continue
+        rd = dict(r)
+        rd["_tid"] = tid
+        new_trades.append(rd)
+
+    if not new_trades:
+        return
+
+    by_date = defaultdict(list)
+    for r in new_trades:
+        by_date[r["trade_date"]].append(r)
+
+    try:
+        from db.portfolios import get_holding_trades
+    except Exception:
+        get_holding_trades = None
+
+    for trade_date in sorted(by_date.keys()):
+        group = by_date[trade_date]
+        date_str = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}" if len(trade_date or "") == 8 else (trade_date or "")
+
+        lines = []
+        for r in group:
+            sym = (r["symbol"] or "")[:30]
+            bs = r["buy_sell"] or ""
+            try:
+                qty = abs(int(float(r["quantity"] or 0)))
+            except Exception:
+                qty = r["quantity"]
+            try:
+                price = float(r["trade_price"] or 0)
+            except Exception:
+                price = 0
+            try:
+                proc = float(r["proceeds"] or 0)
+            except Exception:
+                proc = 0
+            tag = "🔵 买" if bs == "BUY" else ("🔴 卖" if bs == "SELL" else bs)
+            cat = r.get("asset_category") or ""
+            cat_label = "期权" if cat == "OPT" else ("股票" if cat in ("STK", "ETF") else cat)
+            extra = f"  ${proc:+,.0f}" if abs(proc) > 0 else f"  @ ${price:.2f}"
+            lines.append(f"  {tag} {cat_label} {sym} × {qty}{extra}")
+
+        underlyings = set((r.get("underlying_symbol") or r["symbol"] or "").strip() for r in group)
+        summary_lines = []
+        if get_holding_trades:
+            for ul in sorted(u for u in underlyings if u):
+                try:
+                    d = get_holding_trades(user_id, ul, limit=1)
+                    s = d.get("summary") or {}
+                    premium = s.get("totalOptionPremium") or 0
+                    diluted = s.get("currentDilutedCost") or 0
+                    if abs(premium) >= 1 or diluted > 0:
+                        parts = [f"  📊 {ul}"]
+                        if abs(premium) >= 1:
+                            sign = "+" if premium >= 0 else ""
+                            parts.append(f"累计权利金 ${sign}{premium:,.0f}")
+                        if diluted > 0:
+                            parts.append(f"实时摊薄 ${diluted:,.2f}/股")
+                        summary_lines.append(" · ".join(parts))
+                except Exception:
+                    pass
+
+        msg_parts = [f"💹 <b>新成交</b> | 📅 {date_str}", "━━━━━━━━━━━━━━━", "\n".join(lines)]
+        if summary_lines:
+            msg_parts.append("━━━━━━━━━━━━━━━")
+            msg_parts.append("📈 标的摊薄汇总")
+            msg_parts.append("\n".join(summary_lines))
+        msg = "\n".join(msg_parts)
+
+        try:
+            data = urllib.parse.urlencode({
+                "chat_id": chat_id, "text": msg,
+                "parse_mode": "HTML", "disable_web_page_preview": "true",
+            }).encode()
+            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            urllib.request.urlopen(urllib.request.Request(url, data=data, method="POST"), timeout=15)
+        except Exception as e:
+            print(f"sendMessage failed for {user_id}: {e}")
+            continue
+
+        for r in group:
+            try:
+                execute(
+                    """
+                    INSERT INTO user_notification_logs (user_id, type, payload)
+                    VALUES (%s, 'trade_pushed', %s)
+                    """,
+                    (user_id, json.dumps({"trade_id": r["_tid"]})),
+                )
+            except Exception as e:
+                print(f"log insert fail: {e}")

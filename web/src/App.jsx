@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useT } from './lib/i18n';
 import { Routes, Route, useParams, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useDashboardStore } from './stores/dashboardStore';
 import Layout from './components/Layout';
@@ -6,9 +7,8 @@ import OverviewTab from './components/tabs/OverviewTab';
 import PerformanceTab from './components/tabs/PerformanceTab';
 import PositionsTab from './components/tabs/PositionsTab';
 import DetailsTab from './components/tabs/DetailsTab';
-import ChangesTab from './components/tabs/ChangesTab';
 import TaxTab from './components/tabs/TaxTab';
-import ChengjiTab from './components/tabs/ChengjiTab';
+import PortfoliosTab from './components/tabs/PortfoliosTab';
 import SharePage from "./pages/SharePage";
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -16,6 +16,7 @@ import AdminPage from './pages/AdminPage';
 import HelpPage from './pages/HelpPage';
 
 function DashboardRoute() {
+  const t = useT();
   const { account, tab } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -66,7 +67,7 @@ function DashboardRoute() {
 
   const loadedSlices = useDashboardStore((s) => s.loadedSlices);
   const isTabLoading = !!tabLoading[activeTab];
-  const sliceMap = { overview: 'overview', positions: 'positions', performance: 'performance', details: 'details', changes: 'changes', chengji: 'chengji' };
+  const sliceMap = { overview: 'overview', positions: 'positions', performance: 'performance', details: 'details', portfolios: 'portfolios' };
   const isSliceReady = loadedSlices[sliceMap[activeTab]] === currentAccount;
   const showLoading = loading || (isTabLoading && !isSliceReady);
 
@@ -74,7 +75,7 @@ function DashboardRoute() {
     <Layout>
       {showLoading && (
         <div className="py-20 text-center text-[var(--gray)]">
-          <div className="mb-4 text-2xl">加载中...</div>
+          <div className="mb-4 text-2xl">{t("加载中…")}</div>
         </div>
       )}
       {error && !showLoading && (
@@ -89,14 +90,13 @@ function DashboardRoute() {
           {activeTab === 'performance' && <PerformanceTab />}
           {activeTab === 'positions' && <PositionsTab />}
           {activeTab === 'details' && <DetailsTab />}
-          {activeTab === 'changes' && <ChangesTab />}
           {activeTab === 'tax' && <TaxTab />}
-          {activeTab === 'chengji' && <ChengjiTab />}
+          {activeTab === 'portfolios' && <PortfoliosTab />}
         </>
       )}
       {isTabLoading && (
         <div className="fixed bottom-4 right-4 z-50 rounded-lg border border-[var(--light-gray)] bg-white px-3 py-2 text-xs text-[var(--gray)] shadow">
-          正在加载 {activeTab} 数据...
+          {t("正在加载 {tab} 数据…", { tab: activeTab })}
         </div>
       )}
     </Layout>
@@ -109,8 +109,9 @@ function RequireAuth({ children }) {
 }
 
 export default function App() {
+  const t = useT();
   return (
-    <Routes>
+      <Routes>
       <Route path="/share/:token" element={<SharePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
@@ -120,5 +121,5 @@ export default function App() {
       <Route path="/:account" element={<DashboardRoute />} />
       <Route path="/:account/:tab" element={<DashboardRoute />} />
     </Routes>
-  );
+    );
 }
